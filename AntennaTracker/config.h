@@ -3,6 +3,13 @@
 
 #include "defines.h"
 
+#include "APM_Config.h" // <== THIS INCLUDE, DO NOT EDIT IT. EVER.
+
+///
+/// DO NOT EDIT THIS INCLUDE - if you want to make a local change, make that
+/// change in your local copy of APM_Config.h.
+///
+
 // Just so that it's completely clear...
 #define ENABLED                 1
 #define DISABLED                0
@@ -55,7 +62,7 @@
 #endif
 
 //
-// Logging control
+// Dataflash logging control
 //
 #ifndef LOGGING_ENABLED
 # define LOGGING_ENABLED        ENABLED
@@ -69,6 +76,5 @@
     MASK_LOG_RCIN | \
     MASK_LOG_IMU | \
     MASK_LOG_RCOUT | \
-    MASK_LOG_COMPASS | \
-    MASK_LOG_CURRENT
+    MASK_LOG_COMPASS
 #endif

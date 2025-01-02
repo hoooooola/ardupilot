@@ -4,14 +4,6 @@
 
 namespace Linux {
 
-enum class LINUX_BOARD_TYPE: int {
-	RPI_ZERO_1=0,
-    RPI_2_3_ZERO2=1,
-	RPI_4=2,
-    ALLWINNWER_H616=100,
-    UNKNOWN_BOARD=999
-};
-
 class UtilRPI : public Util {
 public:
     UtilRPI();
@@ -21,14 +13,14 @@ public:
     }
 
     /* return the Raspberry Pi version */
-    LINUX_BOARD_TYPE detect_linux_board_type() const;
+    int get_rpi_version() const;
 
 protected:
     // Called in the constructor once
-    void _get_board_type_using_peripheral_base();
+    int _check_rpi_version();
 
 private:
-    LINUX_BOARD_TYPE _linux_board_version = LINUX_BOARD_TYPE::UNKNOWN_BOARD;
+    int _rpi_version = 0;
 };
 
 }

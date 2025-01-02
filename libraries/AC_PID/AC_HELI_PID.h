@@ -9,7 +9,7 @@
 #include <cmath>
 #include "AC_PID.h"
 
-static const float AC_PID_LEAK_MIN = 0.1f;  // Default I-term Leak Minimum
+#define AC_PID_LEAK_MIN     0.1  // Default I-term Leak Minimum
 
 /// @class	AC_HELI_PID
 /// @brief	Heli PID control class
@@ -17,16 +17,22 @@ class AC_HELI_PID : public AC_PID {
 public:
 
     /// Constructor for PID
-    AC_HELI_PID(float initial_p, float initial_i, float initial_d, float initial_ff, float initial_imax, float initial_filt_T_hz, float initial_filt_E_hz, float initial_filt_D_hz);
+    AC_HELI_PID(float initial_p, float initial_i, float initial_d, float initial_imax, float initial_filt_hz, float dt, float initial_ff);
 
-    CLASS_NO_COPY(AC_HELI_PID);
+    /// get_vff - return Velocity FeedForward Term 
+    float       get_vff(float requested_rate);
 
-    /// update_leaky_i - replacement for get_i but output is leaked at leak_rate
-    void       update_leaky_i(float leak_rate);
+    /// get_leaky_i - replacement for get_i but output is leaded at leak_rate
+    float       get_leaky_i(float leak_rate);
+
+    // accessors
+    float       ff() const { return _vff.get(); }
+    void        ff(const float v) { _vff.set(v); }
 
     static const struct AP_Param::GroupInfo        var_info[];
 
 private:
+    AP_Float        _vff;
     AP_Float        _leak_min;
 
     float           _last_requested_rate;       // Requested rate from last iteration, used to calculate rate change of requested rate

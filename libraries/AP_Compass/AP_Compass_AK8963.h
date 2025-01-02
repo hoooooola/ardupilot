@@ -1,9 +1,5 @@
 #pragma once
 
-#include "AP_Compass_config.h"
-
-#if AP_COMPASS_AK8963_ENABLED
-
 #include <AP_Common/AP_Common.h>
 #include <AP_HAL/AP_HAL.h>
 #include <AP_HAL/I2CDevice.h>
@@ -22,16 +18,18 @@ class AP_Compass_AK8963 : public AP_Compass_Backend
 {
 public:
     /* Probe for AK8963 standalone on I2C bus */
-    static AP_Compass_Backend *probe(AP_HAL::OwnPtr<AP_HAL::I2CDevice> dev,
-                                     enum Rotation rotation);
+    static AP_Compass_Backend *probe(Compass &compass,
+                                     AP_HAL::OwnPtr<AP_HAL::I2CDevice> dev,
+                                     enum Rotation rotation = ROTATION_NONE);
 
     /* Probe for AK8963 on auxiliary bus of MPU9250, connected through I2C */
-    static AP_Compass_Backend *probe_mpu9250(AP_HAL::OwnPtr<AP_HAL::I2CDevice> dev,
-                                             enum Rotation rotation);
+    static AP_Compass_Backend *probe_mpu9250(Compass &compass,
+                                             AP_HAL::OwnPtr<AP_HAL::I2CDevice> dev,
+                                             enum Rotation rotation = ROTATION_NONE);
 
     /* Probe for AK8963 on auxiliary bus of MPU9250, connected through SPI */
-    static AP_Compass_Backend *probe_mpu9250(uint8_t mpu9250_instance,
-                                             enum Rotation rotation);
+    static AP_Compass_Backend *probe_mpu9250(Compass &compass, uint8_t mpu9250_instance,
+                                             enum Rotation rotation = ROTATION_NONE);
 
     static constexpr const char *name = "AK8963";
 
@@ -40,8 +38,8 @@ public:
     void read() override;
 
 private:
-    AP_Compass_AK8963(AP_AK8963_BusDriver *bus,
-                      enum Rotation rotation);
+    AP_Compass_AK8963(Compass &compass, AP_AK8963_BusDriver *bus,
+                      enum Rotation rotation = ROTATION_NONE);
 
     bool init();
     void _make_factory_sensitivity_adjustment(Vector3f &field) const;
@@ -52,14 +50,21 @@ private:
     bool _check_id();
     bool _calibrate();
 
-    void _update();
+    bool _update();
+    void _update_timer();
 
     AP_AK8963_BusDriver *_bus;
 
     float _magnetometer_ASA[3] {0, 0, 0};
+    float _mag_x_accum;
+    float _mag_y_accum;
+    float _mag_z_accum;
+    uint32_t _accum_count;
+    uint32_t _last_update_timestamp;
 
     uint8_t _compass_instance;
     bool _initialized;
+    bool _timesliced;
     enum Rotation _rotation;
 };
 
@@ -126,8 +131,8 @@ public:
     
     AP_HAL::Semaphore  *get_semaphore() override;
 
-    bool configure() override;
-    bool start_measurements() override;
+    bool configure();
+    bool start_measurements();
 
     // set device type within a device class
     void set_device_type(uint8_t devtype) override;
@@ -140,5 +145,3 @@ private:
     AuxiliaryBusSlave *_slave;
     bool _started;
 };
-
-#endif  // AP_COMPASS_AK8963_ENABLED

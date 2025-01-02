@@ -25,6 +25,11 @@ extern const AP_HAL::HAL& hal;
 
 bool ExternalLED::init(void)
 {
+    // return immediately if disabled
+    if (!AP_Notify::flags.external_leds) {
+        return false;
+    }
+
     // setup the main LEDs as outputs
     hal.gpio->pinMode(EXTERNAL_LED_ARMED, HAL_GPIO_OUTPUT);
     hal.gpio->pinMode(EXTERNAL_LED_GPS, HAL_GPIO_OUTPUT);
@@ -44,6 +49,11 @@ bool ExternalLED::init(void)
  */
 void ExternalLED::update(void)
 {
+    // return immediately if disabled
+    if (!AP_Notify::flags.external_leds) {
+        return;
+    }
+
     // reduce update rate from 50hz to 10hz
     _counter++;
     if (_counter < 5) {
@@ -185,7 +195,7 @@ void ExternalLED::update(void)
                 break;
         }
     }else{
-        if (AP_Notify::flags.failsafe_battery || AP_Notify::flags.failsafe_radio || AP_Notify::flags.failsafe_gcs) {
+        if (AP_Notify::flags.failsafe_battery || AP_Notify::flags.failsafe_radio) {
             // radio or battery failsafe indicated by fast flashing
             set_pattern(FAST_FLASH);
         } else {

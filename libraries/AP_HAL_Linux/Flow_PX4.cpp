@@ -37,7 +37,9 @@
  *
  ****************************************************************************/
 #include <AP_HAL/AP_HAL.h>
-#if CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_BEBOP
+#if CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_BEBOP ||\
+    CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_MINLURE ||\
+    CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_BBBMINI
 #include "Flow_PX4.h"
 
 #include <cmath>
@@ -72,7 +74,7 @@ Flow_PX4::Flow_PX4(uint32_t width, uint32_t bytesperline,
      * So _num_blocks = _width / (2 * _search_size + 3)
      */
     _num_blocks = _width / (2 * _search_size + 3);
-    _pixstep = ceilf(((float)(_pixhi - _pixlo)) / _num_blocks);
+    _pixstep = ceil(((float)(_pixhi - _pixlo)) / _num_blocks);
 }
 
 /**

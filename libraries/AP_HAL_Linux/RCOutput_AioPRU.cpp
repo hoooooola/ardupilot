@@ -20,19 +20,13 @@
 
 #include <AP_HAL/AP_HAL.h>
 
-#if CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_BLUE
-#include "../../Tools/Linux_HAL_Essentials/pru/aiopru/RcAioPRU_BBBLUE_bin.h"
-#elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_POCKET
-#include "../../Tools/Linux_HAL_Essentials/pru/aiopru/RcAioPRU_POCKET_bin.h"
-#else
-#include "../../Tools/Linux_HAL_Essentials/pru/aiopru/RcAioPRU_BBBMINI_bin.h"
-#endif
+#include "../../Tools/Linux_HAL_Essentials/pru/aiopru/RcAioPRU_bin.h"
 
 using namespace Linux;
 
 static void catch_sigbus(int sig)
 {
-    AP_HAL::panic("RCOutputAioPRU.cpp:SIGBUS error generated\n");
+    AP_HAL::panic("RCOutputAioPRU.cpp:SIGBUS error gernerated\n");
 }
 void RCOutput_AioPRU::init()
 {
@@ -50,13 +44,13 @@ void RCOutput_AioPRU::init()
 
    close(mem_fd);
 
-   // Reset PRU
+   // Reset PRU 1
    *ctrl = 0;
 
    // Load firmware
    memcpy(iram, PRUcode, sizeof(PRUcode));
 
-   // Start PRU
+   // Start PRU 1
    *ctrl |= 2;
 
    // all outputs default to 50Hz, the top level vehicle code
@@ -144,9 +138,6 @@ void RCOutput_AioPRU::cork(void)
 
 void RCOutput_AioPRU::push(void)
 {
-    if (!corked) {
-        return;
-    }
     corked = false;
     for (uint8_t i=0; i<PWM_CHAN_COUNT; i++) {
         if (pending_mask & (1U<<i)) {

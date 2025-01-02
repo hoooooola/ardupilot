@@ -16,13 +16,22 @@
   handle disk IO for terrain code
  */
 
+#include <AP_HAL/AP_HAL.h>
+#include <AP_Common/AP_Common.h>
+#include <AP_Math/AP_Math.h>
+#include <GCS_MAVLink/GCS_MAVLink.h>
+#include <GCS_MAVLink/GCS.h>
 #include "AP_Terrain.h"
 
 #if AP_TERRAIN_AVAILABLE
 
-#include <AP_HAL/AP_HAL.h>
-#include <AP_Common/AP_Common.h>
-#include <AP_Math/AP_Math.h>
+#include <assert.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <errno.h>
 
 extern const AP_HAL::HAL& hal;
 
@@ -68,7 +77,7 @@ void AP_Terrain::calculate_grid_info(const Location &loc, struct grid_info &info
     ref.lng = info.lon_degrees*10*1000*1000L;
 
     // find offset from reference
-    const Vector2f offset = ref.get_distance_NE(loc);
+    Vector2f offset = location_diff(ref, loc);
 
     // get indices in terms of grid_spacing elements
     uint32_t idx_x = offset.x / grid_spacing;
@@ -89,8 +98,9 @@ void AP_Terrain::calculate_grid_info(const Location &loc, struct grid_info &info
     info.frac_y = (offset.y - idx_y * grid_spacing) / grid_spacing;
 
     // calculate lat/lon of SW corner of 32*28 grid_block
-    ref.offset(info.grid_idx_x * TERRAIN_GRID_BLOCK_SPACING_X * (float)grid_spacing,
-               info.grid_idx_y * TERRAIN_GRID_BLOCK_SPACING_Y * (float)grid_spacing);
+    location_offset(ref, 
+                    info.grid_idx_x * TERRAIN_GRID_BLOCK_SPACING_X * (float)grid_spacing,
+                    info.grid_idx_y * TERRAIN_GRID_BLOCK_SPACING_Y * (float)grid_spacing);
     info.grid_lat = ref.lat;
     info.grid_lon = ref.lng;
 
@@ -110,8 +120,8 @@ AP_Terrain::grid_cache &AP_Terrain::find_grid_cache(const struct grid_info &info
 
     // see if we have that grid
     for (uint16_t i=0; i<cache_size; i++) {
-        if (TERRAIN_LATLON_EQUAL(cache[i].grid.lat,info.grid_lat) &&
-            TERRAIN_LATLON_EQUAL(cache[i].grid.lon,info.grid_lon) &&
+        if (cache[i].grid.lat == info.grid_lat && 
+            cache[i].grid.lon == info.grid_lon &&
             cache[i].grid.spacing == grid_spacing) {
             cache[i].last_access_ms = AP_HAL::millis();
             return cache[i];
@@ -149,16 +159,16 @@ int16_t AP_Terrain::find_io_idx(enum GridCacheState state)
 {
     // try first with given state
     for (uint16_t i=0; i<cache_size; i++) {
-        if (TERRAIN_LATLON_EQUAL(disk_block.block.lat,cache[i].grid.lat) &&
-            TERRAIN_LATLON_EQUAL(disk_block.block.lon,cache[i].grid.lon) &&
+        if (disk_block.block.lat == cache[i].grid.lat &&
+            disk_block.block.lon == cache[i].grid.lon && 
             cache[i].state == state) {
             return i;
         }
     }    
     // then any state
     for (uint16_t i=0; i<cache_size; i++) {
-        if (TERRAIN_LATLON_EQUAL(disk_block.block.lat,cache[i].grid.lat) &&
-            TERRAIN_LATLON_EQUAL(disk_block.block.lon,cache[i].grid.lon)) {
+        if (disk_block.block.lat == cache[i].grid.lat &&
+            disk_block.block.lon == cache[i].grid.lon) {
             return i;
         }
     }    

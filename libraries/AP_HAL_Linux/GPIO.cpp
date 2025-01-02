@@ -4,7 +4,7 @@
 
 using namespace Linux;
 
-extern const AP_HAL::HAL& hal;
+static const AP_HAL::HAL& hal = AP_HAL::get_HAL();
 
 DigitalSource::DigitalSource(uint8_t v) :
     _v(v)

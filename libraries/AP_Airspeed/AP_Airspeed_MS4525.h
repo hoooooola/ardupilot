@@ -14,25 +14,23 @@
  */
 #pragma once
 
-#include "AP_Airspeed_config.h"
-
-#if AP_AIRSPEED_MS4525_ENABLED
-
 /*
   backend driver for airspeed from I2C
  */
 
 #include <AP_HAL/AP_HAL.h>
+#include <AP_Param/AP_Param.h>
 #include <AP_HAL/utility/OwnPtr.h>
 #include <AP_HAL/I2CDevice.h>
 #include <utility>
 
 #include "AP_Airspeed_Backend.h"
+#include <AP_HAL/I2CDevice.h>
 
 class AP_Airspeed_MS4525 : public AP_Airspeed_Backend
 {
 public:
-    AP_Airspeed_MS4525(AP_Airspeed &frontend, uint8_t _instance);
+    AP_Airspeed_MS4525(AP_Airspeed &frontend);
     ~AP_Airspeed_MS4525(void) {}
     
     // probe and initialise the sensor
@@ -47,10 +45,8 @@ public:
 private:
     void _measure();
     void _collect();
-    void _timer();
+    bool _timer();
     void _voltage_correction(float &diff_press_pa, float &temperature);
-    float _get_pressure(int16_t dp_raw) const;
-    float _get_temperature(int16_t dT_raw) const;
 
     float _temp_sum;
     float _press_sum;
@@ -61,8 +57,4 @@ private:
     uint32_t _last_sample_time_ms;
     uint32_t _measurement_started_ms;
     AP_HAL::OwnPtr<AP_HAL::I2CDevice> _dev;
-
-    bool probe(uint8_t bus, uint8_t address);
 };
-
-#endif  // AP_AIRSPEED_MS4525_ENABLED

@@ -13,12 +13,10 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 /*
-  simulator connector for JSBSim
+  simulator connector for ardupilot version of JSBSim
 */
 
 #include "SIM_JSBSim.h"
-
-#if HAL_SIM_JSBSIM_ENABLED
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -38,8 +36,8 @@ namespace SITL {
 
 #define DEBUG_JSBSIM 1
 
-JSBSim::JSBSim(const char *frame_str) :
-    Aircraft(frame_str),
+JSBSim::JSBSim(const char *home_str, const char *frame_str) :
+    Aircraft(home_str, frame_str),
     sock_control(false),
     sock_fgfdm(true),
     initialised(false),
@@ -62,11 +60,6 @@ JSBSim::JSBSim(const char *frame_str) :
     if (model_name != nullptr) {
         jsbsim_model = model_name + 1;
     }
-    control_port = 5505 + instance*10;
-    fdm_port = 5504 + instance*10;
-
-    printf("JSBSim backend started: control_port=%u fdm_port=%u\n",
-           control_port, fdm_port);
 }
 
 /*
@@ -77,12 +70,11 @@ bool JSBSim::create_templates(void)
     if (created_templates) {
         return true;
     }
+    control_port = 5505 + instance*10;
+    fdm_port = 5504 + instance*10;
 
     asprintf(&jsbsim_script, "%s/jsbsim_start_%u.xml", autotest_dir, instance);
     asprintf(&jsbsim_fgout,  "%s/jsbsim_fgout_%u.xml", autotest_dir, instance);
-
-    printf("JSBSim_script: '%s'\n", jsbsim_script);
-    printf("JSBSim_fgout: '%s'\n", jsbsim_fgout);
 
     FILE *f = fopen(jsbsim_script, "w");
     if (f == nullptr) {
@@ -105,7 +97,7 @@ bool JSBSim::create_templates(void)
 "       interface on TCP 5124 -->\n"
 "  <input port=\"%u\"/>\n"
 "\n"
-"  <run start=\"0\" end=\"10000000\" dt=\"%.6f\">\n"
+"  <run start=\"0\" end=\"10000000\" dt=\"0.001\">\n"
 "    <property value=\"0\"> simulation/notify-time-trigger </property>\n"
 "\n"
 "    <event name=\"start engine\">\n"
@@ -126,8 +118,7 @@ bool JSBSim::create_templates(void)
             jsbsim_model,
             jsbsim_model,
             jsbsim_model,
-            control_port,
-            1.0/rate_hz);
+            control_port);
     fclose(f);
 
     f = fopen(jsbsim_fgout, "w");
@@ -135,17 +126,12 @@ bool JSBSim::create_templates(void)
         AP_HAL::panic("Unable to create jsbsim fgout script %s", jsbsim_fgout);
     }
     fprintf(f, "<?xml version=\"1.0\"?>\n"
-            "<output name=\"127.0.0.1\" type=\"FLIGHTGEAR\" port=\"%u\" protocol=\"UDP\" rate=\"%f\">\n"
-            "  <time type=\"simulation\" resolution=\"1e-6\"/>\n"
-            "</output>",
-            fdm_port, rate_hz);
+            "<output name=\"127.0.0.1\" type=\"FLIGHTGEAR\" port=\"%u\" protocol=\"udp\" rate=\"1000\"/>\n",
+            fdm_port);
     fclose(f);
 
     char *jsbsim_reset;
     asprintf(&jsbsim_reset, "%s/aircraft/%s/reset.xml", autotest_dir, jsbsim_model);
-
-    printf("JSBSim_reset: '%s'\n", jsbsim_reset);
-
     f = fopen(jsbsim_reset, "w");
     if (f == nullptr) {
         AP_HAL::panic("Unable to create jsbsim reset script %s", jsbsim_reset);
@@ -155,7 +141,7 @@ bool JSBSim::create_templates(void)
     fprintf(f,
             "<?xml version=\"1.0\"?>\n"
             "<initialize name=\"Start up location\">\n"
-            "  <latitude unit=\"DEG\" type=\"geodetic\"> %f </latitude>\n"
+            "  <latitude unit=\"DEG\"> %f </latitude>\n"
             "  <longitude unit=\"DEG\"> %f </longitude>\n"
             "  <altitude unit=\"M\"> 1.3 </altitude>\n"
             "  <vt unit=\"FT/SEC\"> 0.0 </vt>\n"
@@ -203,13 +189,9 @@ bool JSBSim::start_JSBSim(void)
         }
         char *logdirective;
         char *script;
-        char *nice;
-        char *rate;
 
         asprintf(&logdirective, "--logdirectivefile=%s", jsbsim_fgout);
         asprintf(&script, "--script=%s", jsbsim_script);
-        asprintf(&nice, "--nice=%.8f", 10*1e-9);
-        asprintf(&rate, "--simulation-rate=%f", rate_hz);
 
         if (chdir(autotest_dir) != 0) {
             perror(autotest_dir);
@@ -218,9 +200,10 @@ bool JSBSim::start_JSBSim(void)
 
         int ret = execlp("JSBSim",
                          "JSBSim",
+                         "--realtime",
                          "--suspend",
-                         rate,
-                         nice,
+                         "--nice",
+                         "--simulation-rate=1000",
                          logdirective,
                          script,
                          nullptr);
@@ -256,7 +239,7 @@ bool JSBSim::start_JSBSim(void)
 /*
   check for stdout from JSBSim
  */
-void JSBSim::check_stdout(void) const
+void JSBSim::check_stdout(void)
 {
     char line[100];
     ssize_t ret = ::read(jsbsim_stdout, line, sizeof(line));
@@ -270,7 +253,7 @@ void JSBSim::check_stdout(void) const
 /*
   a simple function to wait for a string on jsbsim_stdout
  */
-bool JSBSim::expect(const char *str) const
+bool JSBSim::expect(const char *str)
 {
     const char *basestr = str;
     while (*str) {
@@ -308,7 +291,7 @@ bool JSBSim::open_control_socket(void)
     char startup[] =
         "info\n"
         "resume\n"
-        "iterate 1\n"
+        "step\n"
         "set atmosphere/turb-type 4\n";
     sock_control.send(startup, strlen(startup));
     return true;
@@ -348,7 +331,7 @@ void JSBSim::send_servos(const struct sitl_input &input)
         float ch1 = aileron;
         float ch2 = elevator;
         aileron  = (ch2-ch1)/2.0f;
-        // the minus does away with the need for RC2_REVERSED=-1
+        // the minus does away with the need for RC2_REV=-1
         elevator = -(ch2+ch1)/2.0f;
     } else if (frame == FRAME_VTAIL) {
         // fake a vtail plane
@@ -368,7 +351,7 @@ void JSBSim::send_servos(const struct sitl_input &input)
              "set atmosphere/wind-mag-fps %f\n"
              "set atmosphere/turbulence/milspec/windspeed_at_20ft_AGL-fps %f\n"
              "set atmosphere/turbulence/milspec/severity %f\n"
-             "iterate 1\n",
+             "step\n",
              aileron, elevator, rudder, throttle,
              radians(input.wind.direction),
              wind_speed_fps,
@@ -417,38 +400,36 @@ void JSBSim::recv_fdm(const struct sitl_input &input)
 {
     FGNetFDM fdm;
     check_stdout();
-
-    do {
-        while (sock_fgfdm.recv(&fdm, sizeof(fdm), 100) != sizeof(fdm)) {
-            send_servos(input);
-            check_stdout();
-        }
-        fdm.ByteSwap();
-    } while (fdm.cur_time == time_now_us);
+    while (sock_fgfdm.recv(&fdm, sizeof(fdm), 100) != sizeof(fdm)) {
+        send_servos(input);
+        check_stdout();
+    }
+    fdm.ByteSwap();
 
     accel_body = Vector3f(fdm.A_X_pilot, fdm.A_Y_pilot, fdm.A_Z_pilot) * FEET_TO_METERS;
 
     double p, q, r;
-    SIM::convert_body_frame(degrees(fdm.phi), degrees(fdm.theta),
+    SITL::convert_body_frame(degrees(fdm.phi), degrees(fdm.theta),
                              degrees(fdm.phidot), degrees(fdm.thetadot), degrees(fdm.psidot),
                              &p, &q, &r);
     gyro = Vector3f(p, q, r);
 
     velocity_ef = Vector3f(fdm.v_north, fdm.v_east, fdm.v_down) * FEET_TO_METERS;
-    location.lat = RAD_TO_DEG_DOUBLE * fdm.latitude * 1.0e7;
-    location.lng = RAD_TO_DEG_DOUBLE * fdm.longitude * 1.0e7;
+    location.lat = degrees(fdm.latitude) * 1.0e7;
+    location.lng = degrees(fdm.longitude) * 1.0e7;
     location.alt = fdm.agl*100 + home.alt;
     dcm.from_euler(fdm.phi, fdm.theta, fdm.psi);
-    airspeed = fdm.vcas * KNOTS_TO_METERS_PER_SECOND;
+    airspeed = fdm.vcas * FEET_TO_METERS;
     airspeed_pitot = airspeed;
 
     // update magnetic field
     update_mag_field_bf();
     
-    rpm[0] = fdm.rpm[0];
-    rpm[1] = fdm.rpm[1];
+    rpm1 = fdm.rpm[0];
+    rpm2 = fdm.rpm[1];
     
-    time_now_us = fdm.cur_time;
+    // assume 1kHz for now
+    time_now_us += 1000;
 }
 
 void JSBSim::drain_control_socket()
@@ -458,6 +439,14 @@ void JSBSim::drain_control_socket()
     ssize_t received;
     do {
         received = sock_control.recv(buf, buflen, 0);
+        if (received < 0) {
+            if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                fprintf(stderr, "error recv on control socket: %s",
+                        strerror(errno));
+            }
+        } else {
+            // fprintf(stderr, "received from control socket: %s\n", buf);
+        }
     } while (received > 0);
 }
 /*
@@ -477,11 +466,9 @@ void JSBSim::update(const struct sitl_input &input)
     }
     send_servos(input);
     recv_fdm(input);
-    adjust_frame_time(rate_hz);
+    adjust_frame_time(1000);
     sync_frame_time();
     drain_control_socket();
 }
 
 } // namespace SITL
-
-#endif  // HAL_SIM_JSBSIM_ENABLED

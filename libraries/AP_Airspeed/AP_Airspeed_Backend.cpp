@@ -17,55 +17,35 @@
   backend driver class for airspeed
  */
 
-#include "AP_Airspeed_config.h"
-
-#if AP_AIRSPEED_ENABLED
-
 #include <AP_Common/AP_Common.h>
 #include <AP_HAL/AP_HAL.h>
 #include "AP_Airspeed.h"
-#include "AP_Airspeed_Backend.h"
 
 extern const AP_HAL::HAL &hal;
 
-AP_Airspeed_Backend::AP_Airspeed_Backend(AP_Airspeed &_frontend, uint8_t _instance) :
-    frontend(_frontend),
-    instance(_instance)
+AP_Airspeed_Backend::AP_Airspeed_Backend(AP_Airspeed &_frontend) :
+    frontend(_frontend)
 {
+    sem = hal.util->new_semaphore();
 }
 
 AP_Airspeed_Backend::~AP_Airspeed_Backend(void)
 {
+    delete sem;
 }
  
 
 int8_t AP_Airspeed_Backend::get_pin(void) const
 {
-#ifndef HAL_BUILD_AP_PERIPH
-    return frontend.param[instance].pin;
-#else
-    return 0;
-#endif
+    return frontend._pin;
 }
 
 float AP_Airspeed_Backend::get_psi_range(void) const
 {
-    return frontend.param[instance].psi_range;
+    return frontend._psi_range;
 }
 
 uint8_t AP_Airspeed_Backend::get_bus(void) const
 {
-    return frontend.param[instance].bus;
+    return frontend._bus;
 }
-
-bool AP_Airspeed_Backend::bus_is_confgured(void) const
-{
-    return frontend.param[instance].bus.configured();
-}
-
-void AP_Airspeed_Backend::set_bus_id(uint32_t id)
-{
-    frontend.param[instance].bus_id.set_and_save(int32_t(id));
-}
-
-#endif  // AP_AIRSPEED_ENABLED

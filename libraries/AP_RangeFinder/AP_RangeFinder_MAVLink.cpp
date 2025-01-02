@@ -14,51 +14,45 @@
  */
 
 #include "AP_RangeFinder_MAVLink.h"
-
-#if AP_RANGEFINDER_MAVLINK_ENABLED
-
 #include <AP_HAL/AP_HAL.h>
+
+
+
+extern const AP_HAL::HAL& hal;
+
+/*
+   The constructor also initialises the rangefinder. Note that this
+   constructor is not called until detect() returns true, so we
+   already know that we should setup the rangefinder
+*/
+AP_RangeFinder_MAVLink::AP_RangeFinder_MAVLink(RangeFinder &_ranger, uint8_t instance, RangeFinder::RangeFinder_State &_state) :
+    AP_RangeFinder_Backend(_ranger, instance, _state)
+{
+    last_update_ms = AP_HAL::millis();
+    distance_cm = 0;
+}
+
+/*
+   detect if a MAVLink rangefinder is connected. We'll detect by
+   checking a parameter.
+*/
+bool AP_RangeFinder_MAVLink::detect(RangeFinder &_ranger, uint8_t instance)
+{
+    // Assume that if the user set the RANGEFINDER_TYPE parameter to MAVLink,
+    // there is an attached MAVLink rangefinder
+    return true;
+}
 
 /*
    Set the distance based on a MAVLINK message
 */
-void AP_RangeFinder_MAVLink::handle_msg(const mavlink_message_t &msg)
+void AP_RangeFinder_MAVLink::handle_msg(mavlink_message_t *msg)
 {
     mavlink_distance_sensor_t packet;
-    mavlink_msg_distance_sensor_decode(&msg, &packet);
+    mavlink_msg_distance_sensor_decode(msg, &packet);
 
-    // only accept distances for the configured orentation
-    if (packet.orientation == orientation()) {
-        state.last_reading_ms = AP_HAL::millis();
-        distance_cm = packet.current_distance;
-        _max_distance_cm = packet.max_distance;
-        _min_distance_cm = packet.min_distance;
-        sensor_type = (MAV_DISTANCE_SENSOR)packet.type;
-    }
-}
-
-int16_t AP_RangeFinder_MAVLink::max_distance_cm() const
-{
-    if (_max_distance_cm == 0 && _min_distance_cm == 0) {
-        // we assume if both of these are zero that we ignore both
-        return params.max_distance_cm;
-    }
-
-    if (params.max_distance_cm < _max_distance_cm) {
-        return params.max_distance_cm;
-    }
-    return _max_distance_cm;
-}
-int16_t AP_RangeFinder_MAVLink::min_distance_cm() const
-{
-    if (_max_distance_cm == 0 && _min_distance_cm == 0) {
-        // we assume if both of these are zero that we ignore both
-        return params.min_distance_cm;
-    }
-    if (params.min_distance_cm > _min_distance_cm) {
-        return params.min_distance_cm;
-    }
-    return _min_distance_cm;
+    last_update_ms = AP_HAL::millis();
+    distance_cm = packet.current_distance;
 }
 
 /*
@@ -68,13 +62,11 @@ void AP_RangeFinder_MAVLink::update(void)
 {
     //Time out on incoming data; if we don't get new
     //data in 500ms, dump it
-    if (AP_HAL::millis() - state.last_reading_ms > AP_RANGEFINDER_MAVLINK_TIMEOUT_MS) {
-        set_status(RangeFinder::Status::NoData);
-        state.distance_m = 0.0f;
+    if(AP_HAL::millis() - last_update_ms > AP_RANGEFINDER_MAVLINK_TIMEOUT_MS) {
+        set_status(RangeFinder::RangeFinder_NoData);
+        state.distance_cm = 0;
     } else {
-        state.distance_m = distance_cm * 0.01f;
-        update_status();
+        set_status(RangeFinder::RangeFinder_Good);
+        state.distance_cm = distance_cm;
     }
 }
-
-#endif

@@ -13,15 +13,15 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "AP_BattMonitor_config.h"
-
-#if AP_BATTERY_BEBOP_ENABLED
 
 #include <AP_HAL/AP_HAL.h>
-#include <AP_HAL_Linux/RCOutput_Bebop.h>
-#include <AP_HAL_Linux/RCOutput_Disco.h>
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_LINUX && \
+    (CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_BEBOP || CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_DISCO)
 
 #include "AP_BattMonitor_Bebop.h"
+#include <AP_HAL_Linux/RCOutput_Bebop.h>
+#include <AP_HAL_Linux/RCOutput_Disco.h>
 
 #define BATTERY_VOLTAGE_COMPENSATION_LANDED (0.2f)
 
@@ -177,7 +177,7 @@ void AP_BattMonitor_Bebop::read(void)
     }
 
     /* get battery voltage observed by cypress */
-    vbat_raw = (float)data.batt_mv * 0.001f;
+    vbat_raw = (float)data.batt_mv / 1000.0f;
 
     /* do not compute battery status on ramping or braking transition */
     if (data.status == BEBOP_BLDC_STATUS_RAMPING ||
@@ -208,13 +208,13 @@ void AP_BattMonitor_Bebop::read(void)
 
     /* compute remaining battery percent and get battery capacity */
     remaining = _compute_battery_percentage(vbat);
-    capacity = (float) _params._pack_capacity;
+    capacity = (float) get_capacity();
 
     /* fillup battery state */
     _state.voltage = vbat;
     _state.last_time_micros = tnow;
     _state.healthy = true;
-    _state.consumed_mah = capacity - (remaining * capacity) * 0.01f;
+    _state.current_total_mah = capacity - (remaining * capacity) / 100.0f;
 }
 
-#endif  // AP_BATTERY_BEBOP_ENABLED
+#endif

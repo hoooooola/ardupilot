@@ -1,10 +1,8 @@
 #pragma once
 
-#include "AP_RangeFinder_config.h"
+#include "RangeFinder.h"
+#include "RangeFinder_Backend.h"
 
-#if AP_RANGEFINDER_BBB_PRU_ENABLED
-
-#include "AP_RangeFinder_Backend.h"
 
 #define PRU0_CTRL_BASE 0x4a322000
 
@@ -22,28 +20,15 @@ struct range {
 class AP_RangeFinder_BBB_PRU : public AP_RangeFinder_Backend
 {
 public:
-    /*
-        Constructor:
-        The constructor also initialises the rangefinder. Note that this
-        constructor is not called until detect() returns true, so we
-        already know that we should setup the rangefinder
-    */
-    using AP_RangeFinder_Backend::AP_RangeFinder_Backend;
+    // constructor
+    AP_RangeFinder_BBB_PRU(RangeFinder &ranger, uint8_t instance, RangeFinder::RangeFinder_State &_state);
 
     // static detection function
-    static bool detect();
+    static bool detect(RangeFinder &ranger, uint8_t instance);
 
     // update state
-    void update(void) override;
-
-protected:
-
-    MAV_DISTANCE_SENSOR _get_mav_distance_sensor_type() const override {
-        return MAV_DISTANCE_SENSOR_ULTRASOUND;
-    }
+    void update(void);
 
 private:
 
 };
-
-#endif  // AP_RANGEFINDER_BBB_PRU_ENABLED

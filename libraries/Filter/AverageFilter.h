@@ -33,10 +33,10 @@ public:
     };
 
     // apply - Add a new raw value to the filter, retrieve the filtered result
-    virtual T        apply(T sample) override;
+    virtual T        apply(T sample);
 
     // reset - clear the filter
-    virtual void        reset() override;
+    virtual void        reset();
 
 protected:
     // the number of samples in the filter, maxes out at size of the filter

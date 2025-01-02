@@ -14,10 +14,8 @@
  */
 #pragma once
 
-#include "AP_RangeFinder_config.h"
-
-#if AP_RANGEFINDER_BEBOP_ENABLED
-
+#include "RangeFinder.h"
+#include "RangeFinder_Backend.h"
 #include <AP_HAL_Linux/Thread.h>
 
 /*
@@ -90,17 +88,12 @@ struct adc_capture {
 
 class AP_RangeFinder_Bebop : public AP_RangeFinder_Backend {
 public:
-    AP_RangeFinder_Bebop(RangeFinder::RangeFinder_State &_state, AP_RangeFinder_Params &_params);
+    AP_RangeFinder_Bebop(RangeFinder &ranger,
+            uint8_t instance, RangeFinder::RangeFinder_State &_state);
 
     ~AP_RangeFinder_Bebop(void);
-    static bool detect();
-    void update(void) override;
-
-protected:
-
-    MAV_DISTANCE_SENSOR _get_mav_distance_sensor_type() const override {
-        return MAV_DISTANCE_SENSOR_LASER;
-    }
+    static bool detect(RangeFinder &ranger, uint8_t instance);
+    void update(void);
 
 private:
     void _init(void);
@@ -145,5 +138,3 @@ private:
     int16_t _last_min_distance_cm = 32;
 };
 
-
-#endif  // AP_RANGEFINDER_BEBOP_ENABLED

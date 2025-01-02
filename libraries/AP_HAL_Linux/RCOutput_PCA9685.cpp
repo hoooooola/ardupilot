@@ -42,24 +42,22 @@
 #define PCA9685_MODE2_OUTNE1_BIT   (1 << 1)
 #define PCA9685_MODE2_OUTNE0_BIT   (1 << 0)
 
-#define PCA9685_LED_ON_H_ALWAYS_ON_BIT  (1 << 4)
-#define PCA9685_LED_OFF_H_ALWAYS_OFF_BIT (1 << 4)
-
 /*
  * Drift for internal oscillator
  * see: https://github.com/ArduPilot/ardupilot/commit/50459bdca0b5a1adf95
  * and https://github.com/adafruit/Adafruit-PWM-Servo-Driver-Library/issues/11
  */
 #define PCA9685_INTERNAL_CLOCK (1.04f * 25000000.f)
+#define PCA9685_EXTERNAL_CLOCK 24576000.f
 
 using namespace Linux;
 
 #define PWM_CHAN_COUNT 16
 
-extern const AP_HAL::HAL& hal;
+static const AP_HAL::HAL& hal = AP_HAL::get_HAL();
 
 RCOutput_PCA9685::RCOutput_PCA9685(AP_HAL::OwnPtr<AP_HAL::I2CDevice> dev,
-                                   uint32_t external_clock,
+                                   bool external_clock,
                                    uint8_t channel_offset,
                                    int16_t oe_pin_number) :
     _dev(std::move(dev)),
@@ -70,11 +68,10 @@ RCOutput_PCA9685::RCOutput_PCA9685(AP_HAL::OwnPtr<AP_HAL::I2CDevice> dev,
     _channel_offset(channel_offset),
     _oe_pin_number(oe_pin_number)
 {
-    if (_external_clock > 0) {
-        _osc_clock = _external_clock;
-    } else {
+    if (_external_clock)
+        _osc_clock = PCA9685_EXTERNAL_CLOCK;
+    else
         _osc_clock = PCA9685_INTERNAL_CLOCK;
-    }
 }
 
 RCOutput_PCA9685::~RCOutput_PCA9685()
@@ -99,7 +96,7 @@ void RCOutput_PCA9685::init()
 
 void RCOutput_PCA9685::reset_all_channels()
 {
-    if (!_dev || !_dev->get_semaphore()->take(10)) {
+    if (!_dev->get_semaphore()->take(10)) {
         return;
     }
 
@@ -120,7 +117,7 @@ void RCOutput_PCA9685::set_freq(uint32_t chmask, uint16_t freq_hz)
         write(i, _pulses_buffer[i]);
     }
 
-    if (!_dev || !_dev->get_semaphore()->take(10)) {
+    if (!_dev->get_semaphore()->take(10)) {
         return;
     }
 
@@ -136,7 +133,7 @@ void RCOutput_PCA9685::set_freq(uint32_t chmask, uint16_t freq_hz)
      * different from @freq_hz due to rounding/ceiling. We use ceil() rather
      * than round() so the resulting frequency is never greater than @freq_hz
      */
-    uint8_t prescale = ceilf(_osc_clock / (4096 * freq_hz)) - 1;
+    uint8_t prescale = ceil(_osc_clock / (4096 * freq_hz)) - 1;
     _frequency = _osc_clock / (4096 * (prescale + 1));
 
     /* Write prescale value to match frequency */
@@ -170,56 +167,17 @@ void RCOutput_PCA9685::disable_ch(uint8_t ch)
     write(ch, 0);
 }
 
-bool RCOutput_PCA9685::force_safety_on() {
-    if (!_dev || !_dev->get_semaphore()->take(10)) {
-        return false;
-    }
-    /* Shutdown before sleeping. */
-    _dev->write_register(PCA9685_RA_ALL_LED_OFF_H, PCA9685_ALL_LED_OFF_H_SHUT);
-
-    _dev->get_semaphore()->give();
-    return true;
-}
-
-void RCOutput_PCA9685::force_safety_off() {
-    if (!_dev || !_dev->get_semaphore()->take(10)) {
-        return;
-    }
-    /* Restart the device and enable auto-incremented write */
-    _dev->write_register(PCA9685_RA_MODE1,
-                         PCA9685_MODE1_RESTART_BIT | PCA9685_MODE1_AI_BIT);
-    _dev->get_semaphore()->give();
-}
-
 void RCOutput_PCA9685::write(uint8_t ch, uint16_t period_us)
 {
     if (ch >= (PWM_CHAN_COUNT - _channel_offset)) {
         return;
     }
-    if (_is_gpio_mask & (1U << ch)) {
-        return;
-    }
-    write_raw(ch, period_us);
-}
 
-void RCOutput_PCA9685::write_gpio(uint8_t chan, bool active)
-{
-    if (chan >= (PWM_CHAN_COUNT - _channel_offset)) {
-        return;
-    }
-    _is_gpio_mask |= (1U << chan);
-    write_raw(chan, active);
-}
-
-void RCOutput_PCA9685::write_raw(uint8_t ch, uint16_t period_us) {
-    /* Common code used by both write() and write_gpio() */
     _pulses_buffer[ch] = period_us;
     _pending_write_mask |= (1U << ch);
 
-    if (!_corking) {
-        _corking = true;
+    if (!_corking)
         push();
-    }
 }
 
 void RCOutput_PCA9685::cork()
@@ -229,9 +187,6 @@ void RCOutput_PCA9685::cork()
 
 void RCOutput_PCA9685::push()
 {
-    if (!_corking) {
-        return;
-    }
     _corking = false;
 
     if (_pending_write_mask == 0)
@@ -259,21 +214,13 @@ void RCOutput_PCA9685::push()
         }
 
         uint8_t *d = &pwm_values.data[(ch - min_ch) * 4];
-
-        if (_is_gpio_mask & (1 << ch)) {
-            *d++ = 0;                                                // LEDn_ON_L
-            *d++ = period_us ? PCA9685_LED_ON_H_ALWAYS_ON_BIT : 0;   // LEDn_ON_H
-            *d++ = 0;                                                // LEDn_OFF_L
-            *d++ = period_us ? 0 : PCA9685_LED_OFF_H_ALWAYS_OFF_BIT; // LEDn_OFF_H
-        } else {
-            *d++ = 0;               // LEDn_ON_L
-            *d++ = 0;               // LEDn_ON_H
-            *d++ = length & 0xFF;   // LEDn_OFF_L
-            *d++ = length >> 8;     // LEDn_OFF_H
-        }
+        *d++ = 0;
+        *d++ = 0;
+        *d++ = length & 0xFF;
+        *d++ = length >> 8;
     }
 
-    if (!_dev || !_dev->get_semaphore()->take_nonblocking()) {
+    if (!_dev->get_semaphore()->take_nonblocking()) {
         return;
     }
 

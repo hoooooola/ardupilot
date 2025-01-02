@@ -31,10 +31,10 @@ public:
     FilterWithBuffer();
 
     // apply - Add a new raw value to the filter, retrieve the filtered result
-    virtual T apply(T sample) override;
+    virtual T apply(T sample);
 
     // reset - clear the filter
-    virtual void reset() override;
+    virtual void reset();
 
     // get filter size
     uint8_t get_filter_size() const {

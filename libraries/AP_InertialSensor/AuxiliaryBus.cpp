@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <errno.h>
 #include <stdlib.h>
 
 #include "AuxiliaryBus.h"
@@ -85,6 +86,9 @@ AuxiliaryBusSlave *AuxiliaryBus::request_next_slave(uint8_t addr)
 int AuxiliaryBus::register_periodic_read(AuxiliaryBusSlave *slave, uint8_t reg,
                                          uint8_t size)
 {
+    assert(slave->_instance == _n_slaves);
+    assert(_n_slaves < _max_slaves);
+
     int r = _configure_periodic_read(slave, reg, size);
     if (r < 0)
         return r;
@@ -95,4 +99,13 @@ int AuxiliaryBus::register_periodic_read(AuxiliaryBusSlave *slave, uint8_t reg,
     _slaves[_n_slaves++] = slave;
 
     return 0;
+}
+
+/*
+  add a periodic callback. This is added to a list which the backend needs to then process
+ */
+AP_HAL::Device::PeriodicHandle AuxiliaryBus::register_periodic_callback(uint32_t period_usec, AP_HAL::Device::PeriodicCb cb)
+{
+    // not implemented yet
+    return nullptr;
 }

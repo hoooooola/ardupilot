@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # encoding: utf-8
 
 """
@@ -15,11 +16,11 @@ def configure(cfg):
         return
 
     board = cfg.get_board()
-    if isinstance(board, boards.chibios):
+    if isinstance(board, boards.px4):
         # toolchain is currently broken for gtest
         cfg.msg(
             'Gtest',
-            'STM32 boards currently don\'t support compiling gtest',
+            'PX4 boards currently don\'t support compiling gtest',
             color='YELLOW',
         )
         return
@@ -41,10 +42,10 @@ def configure(cfg):
 def libgtest(bld, **kw):
     kw['cxxflags'] = Utils.to_list(kw.get('cxxflags', [])) + ['-Wno-undef']
     kw.update(
-        source='modules/gtest/googletest/src/gtest-all.cc',
+        source='modules/gtest/src/gtest-all.cc',
         target='gtest/gtest',
-        includes='modules/gtest/googletest modules/gtest/googletest/include',
-        export_includes='modules/gtest/googletest/include',
+        includes='modules/gtest/ modules/gtest/include',
+        export_includes='modules/gtest/include',
         name='GTEST',
     )
     return bld.stlib(**kw)

@@ -1,3 +1,4 @@
+/// -*- tab-width: 4; Mode: C++; c-basic-offset: 4; indent-tabs-mode: nil -*-
 /*
  * Copyright (C) 2016  Emlid Ltd. All rights reserved.
  *
@@ -16,52 +17,38 @@
  */
 #pragma once
 
-#include "AP_Compass_config.h"
-
-#if AP_COMPASS_IST8310_ENABLED
-
 #include <AP_Common/AP_Common.h>
 #include <AP_HAL/AP_HAL.h>
 #include <AP_HAL/I2CDevice.h>
 #include <AP_Math/AP_Math.h>
 
+#include "AP_Compass.h"
 #include "AP_Compass_Backend.h"
-
-#ifndef HAL_COMPASS_IST8310_I2C_ADDR
-#define HAL_COMPASS_IST8310_I2C_ADDR 0x0E
-#endif
-
-#ifndef AP_COMPASS_IST8310_DEFAULT_ROTATION
-#define AP_COMPASS_IST8310_DEFAULT_ROTATION ROTATION_PITCH_180
-#endif
 
 class AP_Compass_IST8310 : public AP_Compass_Backend
 {
 public:
-    static AP_Compass_Backend *probe(AP_HAL::OwnPtr<AP_HAL::I2CDevice> dev,
-                                     bool force_external,
-                                     enum Rotation rotation);
+    static AP_Compass_Backend *probe(Compass &compass,
+                                     AP_HAL::OwnPtr<AP_HAL::I2CDevice> dev,
+                                     enum Rotation rotation = ROTATION_NONE);
 
     void read() override;
 
     static constexpr const char *name = "IST8310";
 
 private:
-    AP_Compass_IST8310(AP_HAL::OwnPtr<AP_HAL::Device> dev,
-                       bool force_external,
+    AP_Compass_IST8310(Compass &compass,
+                       AP_HAL::OwnPtr<AP_HAL::Device> dev,
                        enum Rotation rotation);
 
-    void timer();
+    bool timer();
     bool init();
     void start_conversion();
 
     AP_HAL::OwnPtr<AP_HAL::Device> _dev;
-    AP_HAL::Device::PeriodicHandle _periodic_handle;
 
+    Vector3f _accum = Vector3f();
+    uint32_t _accum_count = 0;
     enum Rotation _rotation;
     uint8_t _instance;
-    bool _ignore_next_sample;
-    bool _force_external;
 };
-
-#endif  // AP_COMPASS_IST8310_ENABLED

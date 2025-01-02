@@ -1,12 +1,7 @@
 #pragma once
 
-#include "AP_RangeFinder_config.h"
-
-#if AP_RANGEFINDER_PULSEDLIGHTLRF_ENABLED
-
-#include "AP_RangeFinder.h"
-#include "AP_RangeFinder_Backend.h"
-
+#include "RangeFinder.h"
+#include "RangeFinder_Backend.h"
 #include <AP_HAL/I2CDevice.h>
 
 /* Connection diagram
@@ -24,30 +19,21 @@ class AP_RangeFinder_PulsedLightLRF : public AP_RangeFinder_Backend
 
 public:
     // static detection function
-    static AP_RangeFinder_Backend *detect(uint8_t bus,
-                                          RangeFinder::RangeFinder_State &_state,
-                                          AP_RangeFinder_Params &_params,
-                                          RangeFinder::Type rftype);
+    static AP_RangeFinder_Backend *detect(uint8_t bus, RangeFinder &ranger, uint8_t instance,
+                                          RangeFinder::RangeFinder_State &_state);
 
     // update state
     void update(void) override {}
 
-protected:
-
-    virtual MAV_DISTANCE_SENSOR _get_mav_distance_sensor_type() const override {
-        return MAV_DISTANCE_SENSOR_LASER;
-    }
 
 private:
     // constructor
-    AP_RangeFinder_PulsedLightLRF(uint8_t bus,
-                                  RangeFinder::RangeFinder_State &_state,
-								  AP_RangeFinder_Params &_params,
-                                  RangeFinder::Type rftype);
+    AP_RangeFinder_PulsedLightLRF(uint8_t bus, RangeFinder &ranger, uint8_t instance,
+                                  RangeFinder::RangeFinder_State &_state);
 
     // start a reading
     bool init(void);
-    void timer(void);
+    bool timer(void);
     bool lidar_transfer(const uint8_t *send, unsigned send_len, uint8_t *recv, unsigned recv_len);
     
     AP_HAL::OwnPtr<AP_HAL::I2CDevice> _dev;
@@ -56,11 +42,7 @@ private:
     uint8_t hw_version;
     uint8_t check_reg_counter;
     bool v2_hardware;
-    bool v3hp_hardware;
     uint16_t last_distance_cm;
-    RangeFinder::Type rftype;
     
     enum { PHASE_MEASURE, PHASE_COLLECT } phase;
 };
-
-#endif  // AP_RANGEFINDER_PULSEDLIGHTLRF_ENABLED

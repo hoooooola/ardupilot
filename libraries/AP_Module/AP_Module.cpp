@@ -13,17 +13,13 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <AP_HAL/AP_HAL.h>
-
-#if AP_MODULE_SUPPORTED
-
 /*
   support for external modules
  */
 
 #include <stdio.h>
-#if defined(HAVE_LIBDL)
 #include <dirent.h>
+#if defined(HAVE_LIBDL)
 #include <dlfcn.h>
 #endif
 #include <AP_Module/AP_Module.h>
@@ -79,7 +75,6 @@ void AP_Module::module_scan(const char *path)
 */
 void AP_Module::init(const char *module_path)
 {
-#if AP_MODULE_SUPPORTED
     // scan through module directory looking for *.so
     DIR *d;
     struct dirent *de;
@@ -100,7 +95,6 @@ void AP_Module::init(const char *module_path)
         free(path);
     }
     closedir(d);
-#endif
 }
 
 
@@ -135,7 +129,7 @@ void AP_Module::call_hook_setup_complete(void)
 /*
   call any AHRS_update hooks
 */
-void AP_Module::call_hook_AHRS_update(const AP_AHRS &ahrs)
+void AP_Module::call_hook_AHRS_update(const AP_AHRS_NavEKF &ahrs)
 {
 #if AP_MODULE_SUPPORTED
     if (hooks[HOOK_AHRS_UPDATE] == nullptr) {
@@ -177,7 +171,7 @@ void AP_Module::call_hook_AHRS_update(const AP_AHRS &ahrs)
         state.origin.altitude = loc.alt*0.01f;
     }
 
-    if (ahrs.get_location(loc)) {
+    if (ahrs.get_position(loc)) {
         state.position.available = true;
         state.position.latitude = loc.lat;
         state.position.longitude = loc.lng;
@@ -185,7 +179,7 @@ void AP_Module::call_hook_AHRS_update(const AP_AHRS &ahrs)
     }
     
     Vector3f pos;
-    if (ahrs.get_relative_position_NED_origin(pos)) {
+    if (ahrs.get_relative_position_NED(pos)) {
         state.relative_position[0] = pos[0];
         state.relative_position[1] = pos[1];
         state.relative_position[2] = pos[2];
@@ -284,5 +278,3 @@ void AP_Module::call_hook_accel_sample(uint8_t instance, float dt, const Vector3
     }
 #endif
 }
-
-#endif // AP_MODULE_SUPPORTED

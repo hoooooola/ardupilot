@@ -20,21 +20,14 @@
   timing for register reads and writes is critical
  */
 
-#include "AP_OpticalFlow_config.h"
-
-#if AP_OPTICALFLOW_PIXART_ENABLED
-
-#include "AP_OpticalFlow_Pixart.h"
-
 #include <AP_HAL/AP_HAL.h>
-#include <AP_Math/crc.h>
+#include <AP_Math/edc.h>
 #include <AP_AHRS/AP_AHRS.h>
 #include <utility>
-#include "AP_OpticalFlow.h"
+#include "OpticalFlow.h"
+#include "AP_OpticalFlow_Pixart.h"
 #include "AP_OpticalFlow_Pixart_SROM.h"
 #include <stdio.h>
-
-#define debug(fmt, args ...)  do {printf(fmt, ## args); } while(0)
 
 extern const AP_HAL::HAL& hal;
 
@@ -69,9 +62,7 @@ extern const AP_HAL::HAL& hal;
 #define PIXART_REG_POWER_RST   0x3A
 #define PIXART_REG_SHUTDOWN    0x3B
 #define PIXART_REG_INV_PROD_ID 0x3F
-#define PIXART_REG_INV_PROD_ID2 0x5F // for 3901
 #define PIXART_REG_MOT_BURST   0x50
-#define PIXART_REG_MOT_BURST2  0x16
 #define PIXART_REG_SROM_BURST  0x62
 #define PIXART_REG_RAW_BURST   0x64
 
@@ -79,22 +70,23 @@ extern const AP_HAL::HAL& hal;
 #define PIXART_WRITE_FLAG      0x80
 
 // timings in microseconds
-#define PIXART_Tsrad           300
+#define PIXART_Tsrad           150
 
 // correct result for SROM CRC
 #define PIXART_SROM_CRC_RESULT 0xBEEF
 
 // constructor
-AP_OpticalFlow_Pixart::AP_OpticalFlow_Pixart(const char *devname, AP_OpticalFlow &_frontend) :
+AP_OpticalFlow_Pixart::AP_OpticalFlow_Pixart(OpticalFlow &_frontend) :
     OpticalFlow_backend(_frontend)
 {
-    _dev = std::move(hal.spi->get_device(devname));
+    _dev = std::move(hal.spi->get_device("external0m3"));
 }
 
+
 // detect the device
-AP_OpticalFlow_Pixart *AP_OpticalFlow_Pixart::detect(const char *devname, AP_OpticalFlow &_frontend)
+AP_OpticalFlow_Pixart *AP_OpticalFlow_Pixart::detect(OpticalFlow &_frontend)
 {
-    AP_OpticalFlow_Pixart *sensor = new AP_OpticalFlow_Pixart(devname, _frontend);
+    AP_OpticalFlow_Pixart *sensor = new AP_OpticalFlow_Pixart(_frontend);
     if (!sensor) {
         return nullptr;
     }
@@ -108,69 +100,64 @@ AP_OpticalFlow_Pixart *AP_OpticalFlow_Pixart::detect(const char *devname, AP_Opt
 // setup the device
 bool AP_OpticalFlow_Pixart::setup_sensor(void)
 {
-    if (!_dev) {
-        return false;
+    if (!_dev->get_semaphore()->take(0)) {
+        AP_HAL::panic("Unable to get bus semaphore");
     }
-    WITH_SEMAPHORE(_dev->get_semaphore());
+
+    uint8_t id;
+    uint16_t crc;
 
     // power-up sequence
     reg_write(PIXART_REG_POWER_RST, 0x5A);
     hal.scheduler->delay(50);
 
     // check product ID
-    uint8_t id1 = reg_read(PIXART_REG_PRODUCT_ID);
-    uint8_t id2;
-    if (id1 == 0x3f) {
-        id2 = reg_read(PIXART_REG_INV_PROD_ID);
-    } else {
-        id2 = reg_read(PIXART_REG_INV_PROD_ID2);
+    if (reg_read(PIXART_REG_PRODUCT_ID) != 0x3F ||
+        reg_read(PIXART_REG_INV_PROD_ID) != 0xC0) {
+        goto failed;
     }
-    debug("id1=0x%02x id2=0x%02x ~id1=0x%02x\n", id1, id2, uint8_t(~id1));
-    if (id1 == 0x3F && id2 == uint8_t(~id1)) {
-        model = PIXART_3900;
-    } else if (id1 == 0x49 && id2 == uint8_t(~id1)) {
-        model = PIXART_3901;
-    } else {
-        debug("Not a recognised device\n");
-        return false;
+    
+    srom_download();
+
+    id = reg_read(PIXART_REG_SROM_ID);
+    if (id != srom_id) {
+        printf("Pixart: bad SROM ID: 0x%02x\n", id);
+        goto failed;
     }
 
-    if (model == PIXART_3900) {
-        srom_download();
-
-        const uint8_t id = reg_read(PIXART_REG_SROM_ID);
-        if (id != srom_id) {
-            debug("Pixart: bad SROM ID: 0x%02x\n", id);
-            return false;
-        }
-
-        reg_write(PIXART_REG_SROM_EN, 0x15);
-        hal.scheduler->delay(10);
-
-        const uint16_t crc = reg_read16u(PIXART_REG_DOUT_L);
-        if (crc != 0xBEEF) {
-            debug("Pixart: bad SROM CRC: 0x%04x\n", crc);
-            return false;
-        }
+    reg_write(PIXART_REG_SROM_EN, 0x15);
+    hal.scheduler->delay(10);
+    
+    crc = reg_read16u(PIXART_REG_DOUT_L);
+    if (crc != 0xBEEF) {
+        printf("Pixart: bad SROM CRC: 0x%04x\n", crc);
+        goto failed;
     }
-
-    if (model == PIXART_3900) {
-        load_configuration(init_data_3900, ARRAY_SIZE(init_data_3900));
-    } else {
-        load_configuration(init_data_3901_1, ARRAY_SIZE(init_data_3901_1));
-        hal.scheduler->delay(100);
-        load_configuration(init_data_3901_2, ARRAY_SIZE(init_data_3901_2));
-    }
+    
+    load_configuration();
 
     hal.scheduler->delay(50);
 
-    debug("Pixart %s ready\n", model==PIXART_3900?"3900":"3901");
+    printf("Pixart ready: prod:0x%02x rev:0x%02x iprod:0x%02x shi:0x%02x cfg1:0x%02x cfg2:0x%02x\n",
+           (unsigned)reg_read(PIXART_REG_PRODUCT_ID),
+           (unsigned)reg_read(PIXART_REG_REVISION_ID),
+           (unsigned)reg_read(PIXART_REG_INV_PROD_ID),
+           (unsigned)reg_read(PIXART_REG_SHUTTER_HI),
+           (unsigned)reg_read(PIXART_REG_CONFIG1),
+           (unsigned)reg_read(PIXART_REG_CONFIG2));
+
+    _dev->get_semaphore()->give();
 
     integral.last_frame_us = AP_HAL::micros();
-
-    _dev->register_periodic_callback(2000, FUNCTOR_BIND_MEMBER(&AP_OpticalFlow_Pixart::timer, void));
+    
+    _dev->register_periodic_callback(2000, FUNCTOR_BIND_MEMBER(&AP_OpticalFlow_Pixart::timer, bool));
     return true;
+
+failed:
+    _dev->get_semaphore()->give();
+    return false;
 }
+
 
 // write an 8 bit register
 void AP_OpticalFlow_Pixart::reg_write(uint8_t reg, uint8_t value)
@@ -190,10 +177,10 @@ uint8_t AP_OpticalFlow_Pixart::reg_read(uint8_t reg)
     uint8_t v = 0;
     _dev->set_chip_select(true);
     _dev->transfer(&reg, 1, nullptr, 0);
-    hal.scheduler->delay_microseconds(35);
+    hal.scheduler->delay_microseconds(PIXART_Tsrad);
     _dev->transfer(nullptr, 0, &v, 1);
     _dev->set_chip_select(false);
-    hal.scheduler->delay_microseconds(200);
+    hal.scheduler->delay_microseconds(120);
     return v;
 }
 
@@ -211,6 +198,7 @@ int16_t AP_OpticalFlow_Pixart::reg_read16s(uint8_t reg)
     return (int16_t)reg_read16u(reg);
 }
 
+
 void AP_OpticalFlow_Pixart::srom_download(void)
 {
     reg_write(0x39, 0x02);
@@ -220,7 +208,7 @@ void AP_OpticalFlow_Pixart::srom_download(void)
     reg_write(PIXART_REG_SROM_EN, 0x18);
 
     if (!_dev->set_chip_select(true)) {
-        debug("Failed to force CS\n");
+        printf("Failed to force CS\n");
     }
     hal.scheduler->delay_microseconds(1);
     uint8_t reg = PIXART_REG_SROM_BURST | PIXART_WRITE_FLAG;
@@ -233,14 +221,14 @@ void AP_OpticalFlow_Pixart::srom_download(void)
 
     hal.scheduler->delay_microseconds(125);
     if (!_dev->set_chip_select(false)) {
-        debug("Failed to force CS off\n");
+        printf("Failed to force CS off\n");
     }
     hal.scheduler->delay_microseconds(160);
 }
 
-void AP_OpticalFlow_Pixart::load_configuration(const RegData *init_data, uint16_t n)
+void AP_OpticalFlow_Pixart::load_configuration(void)
 {
-    for (uint16_t i = 0; i < n; i++) {
+    for (uint16_t i = 0; i < ARRAY_SIZE(init_data); i++) {
         // writing a config register can fail - retry up to 5 times
         for (uint8_t tries=0; tries<5; tries++) {
             reg_write(init_data[i].reg, init_data[i].value);
@@ -248,10 +236,11 @@ void AP_OpticalFlow_Pixart::load_configuration(const RegData *init_data, uint16_
             if (v == init_data[i].value) {
                 break;
             }
-            //debug("reg[%u:%02x] 0x%02x 0x%02x\n", (unsigned)i, (unsigned)init_data[i].reg, (unsigned)init_data[i].value, (unsigned)v);
+            //printf("reg[%u:%02x] 0x%02x 0x%02x\n", (unsigned)i, (unsigned)init_data[i].reg, (unsigned)init_data[i].value, (unsigned)v);
         }
     }
 }
+
 
 void AP_OpticalFlow_Pixart::motion_burst(void)
 {
@@ -259,9 +248,9 @@ void AP_OpticalFlow_Pixart::motion_burst(void)
 
     burst.delta_x = 0;
     burst.delta_y = 0;
-
+    
     _dev->set_chip_select(true);
-    uint8_t reg = model==PIXART_3900?PIXART_REG_MOT_BURST:PIXART_REG_MOT_BURST2;
+    uint8_t reg = PIXART_REG_MOT_BURST;
 
     _dev->transfer(&reg, 1, nullptr, 0);
     hal.scheduler->delay_microseconds(150);
@@ -277,49 +266,42 @@ void AP_OpticalFlow_Pixart::motion_burst(void)
     _dev->set_chip_select(false);
 }
 
-void AP_OpticalFlow_Pixart::timer(void)
+bool AP_OpticalFlow_Pixart::timer(void)
 {
     if (AP_HAL::micros() - last_burst_us < 500) {
-        return;
+        return true;
     }
     motion_burst();
     last_burst_us = AP_HAL::micros();
 
     uint32_t dt_us = last_burst_us - integral.last_frame_us;
     float dt = dt_us * 1.0e-6;
-    const Vector3f &gyro = AP::ahrs().get_gyro();
+    const Vector3f &gyro = get_ahrs().get_gyro();
 
-    {
-        WITH_SEMAPHORE(_sem);
-
+    if (_sem->take(0)) {
         integral.sum.x += burst.delta_x;
         integral.sum.y += burst.delta_y;
         integral.sum_us += dt_us;
         integral.last_frame_us = last_burst_us;
         integral.gyro += Vector2f(gyro.x, gyro.y) * dt;
+        _sem->give();
     }
-
+    
 #if 0
-    static uint32_t last_print_ms;
-    static int fd = -1;
-    if (fd == -1) {
-        fd = open("/dev/ttyACM0", O_WRONLY);
-    }
     // used for debugging
-    static int32_t sum_x;
-    static int32_t sum_y;
     sum_x += burst.delta_x;
     sum_y += burst.delta_y;
-
+    
     uint32_t now = AP_HAL::millis();
     if (now - last_print_ms >= 100 && (sum_x != 0 || sum_y != 0)) {
         last_print_ms = now;
-        dprintf(fd, "Motion: %d %d obs:0x%02x squal:%u rds:%u maxr:%u minr:%u sup:%u slow:%u\n",
+        printf("Motion: %d %d obs:0x%02x squal:%u rds:%u maxr:%u minr:%u sup:%u slow:%u\n",
                (int)sum_x, (int)sum_y, (unsigned)burst.squal, (unsigned)burst.rawdata_sum, (unsigned)burst.max_raw,
                (unsigned)burst.max_raw, (unsigned)burst.min_raw, (unsigned)burst.shutter_upper, (unsigned)burst.shutter_lower);
         sum_x = sum_y = 0;
     }
 #endif
+    return true;
 }
 
 // update - read latest values from sensor and fill in x,y and totals.
@@ -330,30 +312,30 @@ void AP_OpticalFlow_Pixart::update(void)
         return;
     }
     last_update_ms = now;
-
-    struct AP_OpticalFlow::OpticalFlow_state state;
+    
+    struct OpticalFlow::OpticalFlow_state state;
+    state.device_id = 1;
     state.surface_quality = burst.squal;
-
-    if (integral.sum_us > 0) {
-        WITH_SEMAPHORE(_sem);
-
+    
+    if (integral.sum_us > 0 && _sem->take(0)) {
         const Vector2f flowScaler = _flowScaler();
         float flowScaleFactorX = 1.0f + 0.001f * flowScaler.x;
         float flowScaleFactorY = 1.0f + 0.001f * flowScaler.y;
         float dt = integral.sum_us * 1.0e-6;
-
+        
         state.flowRate = Vector2f(integral.sum.x * flowScaleFactorX,
                                   integral.sum.y * flowScaleFactorY);
         state.flowRate *= flow_pixel_scaling / dt;
 
         // we only apply yaw to flowRate as body rate comes from AHRS
         _applyYaw(state.flowRate);
-
+        
         state.bodyRate = integral.gyro / dt;
 
         integral.sum.zero();
         integral.sum_us = 0;
         integral.gyro.zero();
+        _sem->give();
     } else {
         state.flowRate.zero();
         state.bodyRate.zero();
@@ -362,5 +344,3 @@ void AP_OpticalFlow_Pixart::update(void)
     // copy results to front end
     _update_frontend(state);
 }
-
-#endif  // AP_OPTICALFLOW_PIXART_ENABLED

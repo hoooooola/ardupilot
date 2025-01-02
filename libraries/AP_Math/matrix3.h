@@ -37,13 +37,7 @@
 //
 #pragma once
 
-#include "ftype.h"
-
 #include "vector3.h"
-#include "vector2.h"
-
-template <typename T>
-class Vector3;
 
 // 3x3 matrix with elements of type T
 template <typename T>
@@ -208,7 +202,7 @@ public:
      * @return If this matrix is invertible, then true is returned. Otherwise,
      * \p inv is unmodified and false is returned.
      */
-    bool inverse(Matrix3<T>& inv) const WARN_IF_UNUSED;
+    bool inverse(Matrix3<T>& inv) const;
 
     /**
      * Invert this matrix if it is invertible.
@@ -216,7 +210,7 @@ public:
      * @return Return true if this matrix could be successfully inverted and
      * false otherwise.
      */
-    bool invert() WARN_IF_UNUSED;
+    bool invert();
 
     // zero the matrix
     void        zero(void);
@@ -230,23 +224,17 @@ public:
     }
 
     // check if any elements are NAN
-    bool        is_nan(void) WARN_IF_UNUSED
+    bool        is_nan(void)
     {
         return a.is_nan() || b.is_nan() || c.is_nan();
     }
 
     // create a rotation matrix from Euler angles
-    void        from_euler(T roll, T pitch, T yaw);
+    void        from_euler(float roll, float pitch, float yaw);
 
-    // create eulers from a rotation matrix.
-    // roll is from -Pi to Pi
-    // pitch is from -Pi/2 to Pi/2
-    // yaw is from -Pi to Pi
-    void        to_euler(T *roll, T *pitch, T *yaw) const;
+    // create eulers from a rotation matrix
+    void        to_euler(float *roll, float *pitch, float *yaw) const;
 
-    // create matrix from rotation enum
-    void from_rotation(enum Rotation rotation);
-    
     /*
       calculate Euler angles (312 convention) for the matrix.
       See http://www.atacolorado.com/eulersequences.doc
@@ -257,7 +245,7 @@ public:
     /*
       fill the matrix from Euler angles in radians in 312 convention
     */
-    void from_euler312(T roll, T pitch, T yaw);
+    void from_euler312(float roll, float pitch, float yaw);
 
     // apply an additional rotation from a body frame gyro vector
     // to a rotation matrix.
@@ -266,18 +254,10 @@ public:
     // create rotation matrix for rotation about the vector v by angle theta
     // See: https://en.wikipedia.org/wiki/Rotation_matrix#General_rotations
     // "Rotation matrix from axis and angle"
-    void        from_axis_angle(const Vector3<T> &v, T theta);
+    void        from_axis_angle(const Vector3<T> &v, float theta);
     
     // normalize a rotation matrix
     void        normalize(void);
-
-    // double/float conversion
-    Matrix3<double> todouble(void) const {
-        return Matrix3<double>(a.todouble(), b.todouble(), c.todouble());
-    }
-    Matrix3<float> tofloat(void) const {
-        return Matrix3<float>(a.tofloat(), b.tofloat(), c.tofloat());
-    }
 };
 
 typedef Matrix3<int16_t>                Matrix3i;

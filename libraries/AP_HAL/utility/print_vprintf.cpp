@@ -66,12 +66,7 @@
 #define FL_FLTEXP   FL_PREC
 #define FL_FLTFIX   FL_LONG
 
-#if CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS
-// get __FPU_PRESENT
-#include <hal.h>
-#endif
-
-void print_vprintf(AP_HAL::BetterStream *s, const char *fmt, va_list ap)
+void print_vprintf(AP_HAL::Print *s, const char *fmt, va_list ap)
 {
         unsigned char c;        /* holds a char from the format string */
         uint16_t flags;
@@ -94,6 +89,10 @@ void print_vprintf(AP_HAL::BetterStream *s, const char *fmt, va_list ap)
                         break;
                     }
                 }
+                /* emit cr before lf to make most terminals happy */
+                if (c == '\n') {
+                    s->write('\r');
+                }
                 s->write(c);
             }
 
@@ -112,7 +111,7 @@ void print_vprintf(AP_HAL::BetterStream *s, const char *fmt, va_list ap)
                         continue;
                     case '+':
                         flags |= FL_PLUS;
-                        FALLTHROUGH;
+                        /* FALLTHROUGH */
                     case ' ':
                         flags |= FL_SPACE;
                         continue;
@@ -158,7 +157,6 @@ void print_vprintf(AP_HAL::BetterStream *s, const char *fmt, va_list ap)
                 break;
             } while ((c = *fmt++) != 0);
 
-#if CONFIG_HAL_BOARD != HAL_BOARD_CHIBIOS || __FPU_PRESENT
             /*
              * Handle floating-point formats E, F, G, e, f, g.
              */
@@ -351,7 +349,7 @@ flt_oper:
 
                 goto tail;
             }
-#endif //#if CONFIG_HAL_BOARD != HAL_BOARD_CHIBIOS || __FPU_PRESENT
+
             /*
              * Handle string formats c, s, S.
              */
@@ -430,8 +428,7 @@ flt_oper:
                     goto ultoa;
                 case 'p':
                     flags |= FL_ALT;
-
-                    FALLTHROUGH;
+                    /* no break */
                 case 'x':
                     if (flags & FL_ALT)
                         flags |= FL_ALTHEX;

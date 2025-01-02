@@ -22,18 +22,17 @@
 #include "AP_GPS.h"
 #include "GPS_Backend.h"
 
-#if AP_GPS_NOVA_ENABLED
 class AP_GPS_NOVA : public AP_GPS_Backend
 {
 public:
     AP_GPS_NOVA(AP_GPS &_gps, AP_GPS::GPS_State &_state, AP_HAL::UARTDriver *_port);
 
-    AP_GPS::GPS_Status highest_supported_status(void) override { return AP_GPS::GPS_OK_FIX_3D_RTK_FIXED; }
+    AP_GPS::GPS_Status highest_supported_status(void) { return AP_GPS::GPS_OK_FIX_3D_RTK; }
 
     // Methods
-    bool read() override;
+    bool read();
 
-    const char *name() const override { return "NOVA"; }
+    void inject_data(const uint8_t *data, uint16_t len) override;
 
 private:
 
@@ -55,9 +54,17 @@ private:
     
     uint8_t _init_blob_index = 0;
     uint32_t _init_blob_time = 0;
-    static const char* const _initialisation_blob[4];
+    const char* _initialisation_blob[6] = {
+        "\r\n\r\nunlogall\r\n", // cleanup enviroment
+        "log bestposb ontime 0.2 0 nohold\r\n", // get bestpos
+        "log bestvelb ontime 0.2 0 nohold\r\n", // get bestvel
+        "log psrdopb onchanged\r\n", // tersus
+        "log psrdopb ontime 0.2\r\n", // comnav
+        "log psrdopb\r\n" // poll message, as dop only changes when a sat is dropped/added to the visible list
+    };
    
     uint32_t crc_error_counter = 0;
+    uint32_t last_injected_data_ms = 0;
 
     struct PACKED nova_header
     {
@@ -105,26 +112,26 @@ private:
 
     struct PACKED bestpos
     {
-        uint32_t solstat;      ///< Solution status
-        uint32_t postype;      ///< Position type
-        double lat;            ///< latitude (deg)
-        double lng;            ///< longitude (deg)
-        double hgt;            ///< height above mean sea level (m)
-        float undulation;      ///< relationship between the geoid and the ellipsoid (m)
-        uint32_t datumid;      ///< datum id number
-        float latsdev;         ///< latitude standard deviation (m)
-        float lngsdev;         ///< longitude standard deviation (m)
-        float hgtsdev;         ///< height standard deviation (m)
+        uint32_t solstat;
+        uint32_t postype;
+        double lat;
+        double lng;
+        double hgt;
+        float undulation;
+        uint32_t datumid;
+        float latsdev;
+        float lngsdev;
+        float hgtsdev;
         // 4 bytes
-        uint8_t stnid[4];      ///< base station id
-        float diffage;         ///< differential position age (sec)
-        float sol_age;         ///< solution age (sec)
-        uint8_t svstracked;    ///< number of satellites tracked
-        uint8_t svsused;       ///< number of satellites used in solution
-        uint8_t svsl1;         ///< number of GPS plus GLONASS L1 satellites used in solution
-        uint8_t svsmultfreq;   ///< number of GPS plus GLONASS L2 satellites used in solution
-        uint8_t resv;          ///< reserved
-        uint8_t extsolstat;    ///< extended solution status - OEMV and greater only
+        uint8_t stnid[4];
+        float diffage;
+        float sol_age;
+        uint8_t svstracked;
+        uint8_t svsused;
+        uint8_t svsl1;
+        uint8_t svsmultfreq;
+        uint8_t resv;
+        uint8_t extsolstat;
         uint8_t galbeisigmask;
         uint8_t gpsglosigmask;
     };
@@ -176,4 +183,3 @@ private:
         uint16_t read;
     } nova_msg;
 };
-#endif

@@ -15,10 +15,6 @@
 
 #pragma once
 
-#include "AP_Gripper_config.h"
-
-#if AP_GRIPPER_ENABLED
-
 #include <AP_Param/AP_Param.h>
 
 class AP_Gripper_Backend;
@@ -26,12 +22,6 @@ class AP_Gripper_Backend;
 class AP_Gripper {
 public:
     AP_Gripper();
-
-    /* Do not allow copies */
-    CLASS_NO_COPY(AP_Gripper);
-
-    static AP_Gripper *get_singleton();
-    static AP_Gripper *_singleton;
 
     // indicate whether this module is enabled or not
     bool enabled() const { return _enabled; }
@@ -63,7 +53,6 @@ public:
     AP_Int8     _enabled;               // grabber enable/disable
 
     typedef enum {
-        STATE_NEUTRAL,
         STATE_GRABBING,
         STATE_RELEASING,
         STATE_GRABBED,
@@ -75,20 +64,13 @@ public:
         AP_Int16    grab_pwm;              // PWM value sent to Gripper to initiate grabbing the cargo
         AP_Int16    release_pwm;           // PWM value sent to Gripper to release the cargo
         AP_Int16    neutral_pwm;           // PWM value sent to gripper when not grabbing or releasing
-        AP_Int8     regrab_interval;       // Time in seconds that EPM gripper will regrab the cargo to ensure grip has not weakend
-        AP_Float    autoclose_time;        // Automatic close time (in seconds)
+        AP_Int8     regrab_interval;       // Time in seconds that gripper will regrab the cargo to ensure grip has not weakend
         AP_Int16    uavcan_hardpoint_id;
 
-        gripper_state state = STATE_NEUTRAL;
+        gripper_state state = STATE_RELEASED;
     } config;
 
 private:
 
     AP_Gripper_Backend *backend;
 };
-
-namespace AP {
-    AP_Gripper *gripper();
-};
-
-#endif  // AP_GRIPPER_ENABLED

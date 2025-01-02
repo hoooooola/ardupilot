@@ -16,10 +16,7 @@
 #pragma once
 
 #include <AP_Gripper/AP_Gripper_Backend.h>
-
-#if AP_GRIPPER_SERVO_ENABLED
-
-#define SERVO_ACTUATION_TIME    500         // Time for servo to move to target position during grab or release in milliseconds
+#include <RC_Channel/RC_Channel.h>
 
 class AP_Gripper_Servo : public AP_Gripper_Backend {
 public:
@@ -39,9 +36,6 @@ public:
     // released - returns true if gripper in released state
     bool released() const override;
 
-    // valid - returns true if the backend should be working
-    bool valid() const override;
-
 protected:
 
     // type-specific intiailisations:
@@ -52,7 +46,8 @@ protected:
 
 private:
 
+    uint32_t action_timestamp; // ms; time grab or release happened
+    const uint16_t action_time = 3000; // ms; time to grab or release
+
     bool has_state_pwm(const uint16_t pwm) const;
 };
-
-#endif  // AP_GRIPPER_SERVO_ENABLED

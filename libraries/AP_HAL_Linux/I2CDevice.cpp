@@ -56,9 +56,9 @@
 #define I2C_RDRW_IOCTL_MAX_MSGS 42
 #endif
 
-extern const AP_HAL::HAL& hal;
-
 namespace Linux {
+
+static const AP_HAL::HAL &hal = AP_HAL::get_HAL();
 
 /*
  * TODO: move to Util or other upper class to be used by others
@@ -105,7 +105,7 @@ I2CBus::~I2CBus()
 
 void I2CBus::start_cb()
 {
-    sem.take_blocking();
+    sem.take(HAL_SEMAPHORE_BLOCK_FOREVER);
 }
 
 void I2CBus::end_cb()
@@ -154,13 +154,10 @@ I2CDevice::~I2CDevice()
 bool I2CDevice::transfer(const uint8_t *send, uint32_t send_len,
                          uint8_t *recv, uint32_t recv_len)
 {
-    if (_split_transfers && send_len > 0 && recv_len > 0) {
-        return transfer(send, send_len, nullptr, 0) &&
-            transfer(nullptr, 0, recv, recv_len);
-    }
-
     struct i2c_msg msgs[2] = { };
     unsigned nmsgs = 0;
+
+    assert(_bus.fd >= 0);
 
     if (send && send_len != 0) {
         msgs[nmsgs].addr = _address;
@@ -342,10 +339,7 @@ I2CDeviceManager::get_device(std::vector<const char *> devpaths, uint8_t address
 }
 
 AP_HAL::OwnPtr<AP_HAL::I2CDevice>
-I2CDeviceManager::get_device(uint8_t bus, uint8_t address,
-                             uint32_t bus_clock,
-                             bool use_smbus,
-                             uint32_t timeout_ms)
+I2CDeviceManager::get_device(uint8_t bus, uint8_t address)
 {
     for (uint8_t i = 0, n = _buses.size(); i < n; i++) {
         if (_buses[i]->bus == bus) {
@@ -387,6 +381,8 @@ I2CDeviceManager::_create_device(I2CBus &b, uint8_t address) const
 
 void I2CDeviceManager::_unregister(I2CBus &b)
 {
+    assert(b.ref > 0);
+
     if (--b.ref > 0) {
         return;
     }
@@ -413,28 +409,4 @@ void I2CDeviceManager::teardown()
     }
 }
 
-/*
-  get mask of bus numbers for all configured I2C buses
-*/
-uint32_t I2CDeviceManager::get_bus_mask(void) const
-{
-    return HAL_LINUX_I2C_BUS_MASK;
-}
-
-/*
-  get mask of bus numbers for all configured internal I2C buses
-*/
-uint32_t I2CDeviceManager::get_bus_mask_internal(void) const
-{
-    return HAL_LINUX_I2C_INTERNAL_BUS_MASK;
-}
-
-/*
-  get mask of bus numbers for all configured external I2C buses
-*/
-uint32_t I2CDeviceManager::get_bus_mask_external(void) const
-{
-    return HAL_LINUX_I2C_EXTERNAL_BUS_MASK;
-}
-    
 }

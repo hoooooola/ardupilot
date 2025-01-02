@@ -6,21 +6,35 @@
  */
 #pragma once
 
-#if CONFIG_HAL_BOARD == HAL_BOARD_SITL
+#include <AP_HAL/utility/Socket.h>
+
 #include "IRLock.h"
-#include <SITL/SITL.h>
 
 class AP_IRLock_SITL : public IRLock
 {
 public:
+    AP_IRLock_SITL();
+
     // init - initialize sensor library
-    void init(int8_t bus) override;
+    virtual void init();
 
     // retrieve latest sensor data - returns true if new data is available
-    bool update() override;
+    virtual bool update();
 
 private:
-    SITL::SIM          *_sitl;                 // sitl instance pointer
-    uint32_t _last_timestamp = 0;
+
+    /*
+      reply packet sent from simulator to ArduPilot
+     */
+    struct irlock_packet {
+        uint64_t timestamp;
+        uint16_t num_targets;
+        float pos_x;
+        float pos_y;
+        float size_x;
+        float size_y;
+    };
+
+    uint32_t _last_timestamp;
+    SocketAPM sock;
 };
-#endif // CONFIG_HAL_BOARD

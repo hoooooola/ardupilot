@@ -17,17 +17,26 @@
  * AP_OpticalFlow_SITL.cpp - SITL emulation of optical flow sensor.
  */
 
+#include <AP_HAL/AP_HAL.h>
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_SITL
+
 #include "AP_OpticalFlow_SITL.h"
 
-#if AP_OPTICALFLOW_SITL_ENABLED
+extern const AP_HAL::HAL& hal;
 
-#include <AP_HAL/AP_HAL.h>
-#include <SITL/SITL.h>
+AP_OpticalFlow_SITL::AP_OpticalFlow_SITL(OpticalFlow &_frontend) : 
+    OpticalFlow_backend(_frontend) 
+{
+    _sitl = (SITL::SITL *)AP_Param::find_object("SIM_");
+}
+
+void AP_OpticalFlow_SITL::init(void)
+{
+}
 
 void AP_OpticalFlow_SITL::update(void)
 {
-    auto *_sitl = AP::sitl();
-
     if (!_sitl->flow_enable) {
         return;
     }
@@ -43,7 +52,7 @@ void AP_OpticalFlow_SITL::update(void)
                   radians(_sitl->state.pitchRate), 
                   radians(_sitl->state.yawRate));
 
-    AP_OpticalFlow::OpticalFlow_state state;
+    OpticalFlow::OpticalFlow_state state;
 
     // NED velocity vector in m/s
     Vector3f velocity(_sitl->state.speedN,
@@ -57,6 +66,7 @@ void AP_OpticalFlow_SITL::update(void)
                       radians(_sitl->state.yawDeg));
 
 
+    state.device_id = 1;
     state.surface_quality = 51;
 
     // sensor position offset in body frame
@@ -77,17 +87,12 @@ void AP_OpticalFlow_SITL::update(void)
     // correct relative velocity for rotation rates and sensor offset
     relVelSensor += gyro % posRelSensorBF;
 
-    // scaling based on parameters
-    const Vector2f flowScaler = _flowScaler();
-    const float flowScaleFactorX = 1.0f + 0.001f * flowScaler.x;
-    const float flowScaleFactorY = 1.0f + 0.001f * flowScaler.y;
-
     // Divide velocity by range and add body rates to get predicted sensed angular
     // optical rates relative to X and Y sensor axes assuming no misalignment or scale
     // factor error. Note - these are instantaneous values. The sensor sums these values across the interval from the last
     // poll to provide a delta angle across the interface
-    state.flowRate.x = (-relVelSensor.y/range + gyro.x + _sitl->flow_noise * rand_float()) * flowScaleFactorX;
-    state.flowRate.y =  (relVelSensor.x/range + gyro.y + _sitl->flow_noise * rand_float()) * flowScaleFactorY;
+    state.flowRate.x =  -relVelSensor.y/range + gyro.x;
+    state.flowRate.y =   relVelSensor.x/range + gyro.y;
 
     // The flow sensors body rates are assumed to be the same as the vehicle body rates (ie no misalignment)
     // Note - these are instantaneous values. The sensor sums these values across the interval from the last
@@ -103,9 +108,8 @@ void AP_OpticalFlow_SITL::update(void)
 
     if (_sitl->flow_delay != optflow_delay) {
         // cope with updates to the delay control
-        if (_sitl->flow_delay > 0 &&
-            (uint8_t)(_sitl->flow_delay) > ARRAY_SIZE(optflow_data)) {
-            _sitl->flow_delay.set(ARRAY_SIZE(optflow_data));
+        if (_sitl->flow_delay > ARRAY_SIZE(optflow_data)) {
+            _sitl->flow_delay = ARRAY_SIZE(optflow_data);
         }
         optflow_delay = _sitl->flow_delay;
         for (uint8_t i=0; i<optflow_delay; i++) {
@@ -119,4 +123,4 @@ void AP_OpticalFlow_SITL::update(void)
     _update_frontend(state);
 }
 
-#endif  // AP_OPTICALFLOW_SITL_ENABLED
+#endif // CONFIG_HAL_BOARD

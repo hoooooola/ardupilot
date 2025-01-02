@@ -18,6 +18,8 @@
 
 #include <AP_HAL/AP_HAL.h>
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_LINUX
+
 #include <AP_HAL/utility/sparse-endian.h>
 #include <AP_HAL_Linux/GPIO.h>
 #include <AP_Math/AP_Math.h>
@@ -119,45 +121,20 @@ struct PACKED RawData {
 };
 
 AP_InertialSensor_BMI160::AP_InertialSensor_BMI160(AP_InertialSensor &imu,
-                                                   AP_HAL::OwnPtr<AP_HAL::Device> dev,
-                                                   enum Rotation rotation)
+                                                   AP_HAL::OwnPtr<AP_HAL::Device> dev)
     : AP_InertialSensor_Backend(imu)
     , _dev(std::move(dev))
-    , _rotation(rotation)
 {
 }
 
 AP_InertialSensor_Backend *
 AP_InertialSensor_BMI160::probe(AP_InertialSensor &imu,
-                                AP_HAL::OwnPtr<AP_HAL::SPIDevice> dev,
-                                enum Rotation rotation)
+                                AP_HAL::OwnPtr<AP_HAL::SPIDevice> dev)
 {
     if (!dev) {
         return nullptr;
     }
-    auto sensor = new AP_InertialSensor_BMI160(imu, std::move(dev), rotation);
-
-    if (!sensor) {
-        return nullptr;
-    }
-
-    if (!sensor->_init()) {
-        delete sensor;
-        return nullptr;
-    }
-
-    return sensor;
-}
-
-AP_InertialSensor_Backend *
-AP_InertialSensor_BMI160::probe(AP_InertialSensor &imu,
-                                AP_HAL::OwnPtr<AP_HAL::I2CDevice> dev,
-                                enum Rotation rotation)
-{
-    if (!dev) {
-        return nullptr;
-    }
-    auto sensor = new AP_InertialSensor_BMI160(imu, std::move(dev), rotation);
+    auto sensor = new AP_InertialSensor_BMI160(imu, std::move(dev));
 
     if (!sensor) {
         return nullptr;
@@ -175,7 +152,9 @@ void AP_InertialSensor_BMI160::start()
 {
     bool r;
 
-    _dev->get_semaphore()->take_blocking();
+    if (!_dev->get_semaphore()->take(0)) {
+        return;
+    }
 
     r = _configure_accel();
     if (!r) {
@@ -201,14 +180,12 @@ void AP_InertialSensor_BMI160::start()
 
     _dev->get_semaphore()->give();
 
-    if (!_imu.register_accel(_accel_instance, BMI160_ODR_TO_HZ(BMI160_ODR), _dev->get_bus_id_devtype(DEVTYPE_BMI160)) ||
-        !_imu.register_gyro(_gyro_instance, BMI160_ODR_TO_HZ(BMI160_ODR),   _dev->get_bus_id_devtype(DEVTYPE_BMI160))) {
-        return;
-    }
+    _accel_instance = _imu.register_accel(BMI160_ODR_TO_HZ(BMI160_ODR), _dev->get_bus_id_devtype(DEVTYPE_BMI160));
+    _gyro_instance = _imu.register_gyro(BMI160_ODR_TO_HZ(BMI160_ODR),   _dev->get_bus_id_devtype(DEVTYPE_BMI160));
 
     /* Call _poll_data() at 1kHz */
     _dev->register_periodic_callback(1000,
-        FUNCTOR_BIND_MEMBER(&AP_InertialSensor_BMI160::_poll_data, void));
+        FUNCTOR_BIND_MEMBER(&AP_InertialSensor_BMI160::_poll_data, bool));
 }
 
 bool AP_InertialSensor_BMI160::update()
@@ -293,14 +270,14 @@ bool AP_InertialSensor_BMI160::_configure_int1_pin()
 
     r = _dev->write_register(BMI160_REG_INT_EN_1, BMI160_INT_FWM_EN);
     if (!r) {
-        DEV_PRINTF("BMI160: Unable to enable FIFO watermark interrupt engine\n");
+        hal.console->printf("BMI160: Unable to enable FIFO watermark interrupt engine\n");
         return false;
     }
     hal.scheduler->delay(1);
 
     r = _dev->write_register(BMI160_REG_INT_MAP_1, BMI160_INT_MAP_INT1_FWM);
     if (!r) {
-        DEV_PRINTF("BMI160: Unable to configure interrupt mapping\n");
+        hal.console->printf("BMI160: Unable to configure interrupt mapping\n");
         return false;
     }
     hal.scheduler->delay(1);
@@ -308,14 +285,14 @@ bool AP_InertialSensor_BMI160::_configure_int1_pin()
     r = _dev->write_register(BMI160_REG_INT_OUT_CTRL,
                              BMI160_INT1_OUTPUT_EN | BMI160_INT1_LVL);
     if (!r) {
-        DEV_PRINTF("BMI160: Unable to configure interrupt output\n");
+        hal.console->printf("BMI160: Unable to configure interrupt output\n");
         return false;
     }
     hal.scheduler->delay(1);
 
     _int1_pin = hal.gpio->channel(BMI160_INT1_GPIO);
     if (_int1_pin == nullptr) {
-        DEV_PRINTF("BMI160: Couldn't request data ready GPIO channel\n");
+        hal.console->printf("BMI160: Couldn't request data ready GPIO channel\n");
         return false;
     }
     _int1_pin->mode(HAL_GPIO_INPUT);
@@ -331,7 +308,7 @@ bool AP_InertialSensor_BMI160::_configure_fifo()
     r = _dev->write_register(BMI160_REG_FIFO_CONFIG_0,
                              sizeof(struct RawData) / 4);
     if (!r) {
-        DEV_PRINTF("BMI160: Unable to configure FIFO watermark level\n");
+        hal.console->printf("BMI160: Unable to configure FIFO watermark level\n");
         return false;
     }
     hal.scheduler->delay(1);
@@ -339,7 +316,7 @@ bool AP_InertialSensor_BMI160::_configure_fifo()
     r = _dev->write_register(BMI160_REG_FIFO_CONFIG_1,
                              BMI160_FIFO_ACC_EN | BMI160_FIFO_GYR_EN);
     if (!r) {
-        DEV_PRINTF("BMI160: Unable to enable FIFO\n");
+        hal.console->printf("BMI160: Unable to enable FIFO\n");
         return false;
     }
     hal.scheduler->delay(1);
@@ -348,7 +325,7 @@ bool AP_InertialSensor_BMI160::_configure_fifo()
 
     r = _dev->write_register(BMI160_REG_CMD, BMI160_CMD_FIFO_FLUSH);
     if (!r) {
-        DEV_PRINTF("BMI160: Unable to flush FIFO\n");
+        hal.console->printf("BMI160: Unable to flush FIFO\n");
         return false;
     }
 
@@ -399,7 +376,7 @@ read_fifo_read_data:
 
     /* Read again just once */
     if (excess && num_samples) {
-        DEV_PRINTF("BMI160: dropping %u samples from fifo\n",
+        hal.console->printf("BMI160: dropping %u samples from fifo\n",
                             (uint8_t)(excess / sizeof(struct RawData)));
         _dev->write_register(BMI160_REG_CMD, BMI160_CMD_FIFO_FLUSH);
         excess = 0;
@@ -414,8 +391,10 @@ read_fifo_read_data:
                       (float)(int16_t)le16toh(raw_data[i].gyro.y),
                       (float)(int16_t)le16toh(raw_data[i].gyro.z)};
 
-        accel.rotate(_rotation);
-        gyro.rotate(_rotation);
+#if CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_AERO
+        accel.rotate(ROTATION_ROLL_180);
+        gyro.rotate(ROTATION_ROLL_180);
+#endif
 
         accel *= _accel_scale;
         gyro *= _gyro_scale;
@@ -434,13 +413,14 @@ read_fifo_read_data:
 
 read_fifo_end:
     if (!r) {
-        DEV_PRINTF("BMI160: error on reading FIFO\n");
+        hal.console->printf("BMI160: error on reading FIFO\n");
     }
 }
 
-void AP_InertialSensor_BMI160::_poll_data()
+bool AP_InertialSensor_BMI160::_poll_data()
 {
     _read_fifo();
+    return true;
 }
 
 bool AP_InertialSensor_BMI160::_hardware_init()
@@ -449,7 +429,9 @@ bool AP_InertialSensor_BMI160::_hardware_init()
 
     hal.scheduler->delay(BMI160_POWERUP_DELAY_MSEC);
 
-    _dev->get_semaphore()->take_blocking();
+    if (!_dev->get_semaphore()->take(0)) {
+        return false;
+    }
 
     _dev->set_speed(AP_HAL::Device::SPEED_LOW);
 
@@ -510,8 +492,10 @@ bool AP_InertialSensor_BMI160::_init()
 
     ret = _hardware_init();
     if (!ret) {
-        DEV_PRINTF("BMI160: failed to init\n");
+        hal.console->printf("BMI160: failed to init\n");
     }
 
     return ret;
 }
+
+#endif

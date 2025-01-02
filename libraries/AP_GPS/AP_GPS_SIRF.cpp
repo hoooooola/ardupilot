@@ -21,7 +21,6 @@
 #include "AP_GPS_SIRF.h"
 #include <stdint.h>
 
-#if AP_GPS_SIRF_ENABLED
 // Initialisation messages
 //
 // Turn off all messages except for 0x29.
@@ -34,7 +33,12 @@ const uint8_t AP_GPS_SIRF::_initialisation_blob[] = {
 };
 
 AP_GPS_SIRF::AP_GPS_SIRF(AP_GPS &_gps, AP_GPS::GPS_State &_state, AP_HAL::UARTDriver *_port) :
-    AP_GPS_Backend(_gps, _state, _port)
+    AP_GPS_Backend(_gps, _state, _port),
+    _step(0),
+    _gather(false),
+    _payload_length(0),
+    _payload_counter(0),
+    _msg_id(0)
 {
     gps.send_blob_start(state.instance, (const char *)_initialisation_blob, sizeof(_initialisation_blob));
 }
@@ -79,7 +83,7 @@ AP_GPS_SIRF::read(void)
                 break;
             }
             _step = 0;
-            FALLTHROUGH;
+        // FALLTHROUGH
         case 0:
             if(PREAMBLE1 == data)
                 _step++;
@@ -180,8 +184,6 @@ AP_GPS_SIRF::_parse_gps(void)
         state.location.lat      = swap_int32(_buffer.nav.latitude);
         state.location.lng      = swap_int32(_buffer.nav.longitude);
         state.location.alt      = swap_int32(_buffer.nav.altitude_msl);
-        state.have_undulation = true;
-        state.undulation = (state.location.alt - swap_int32(_buffer.nav.altitude_ellipsoid))*0.01;
         state.ground_speed      = swap_int32(_buffer.nav.ground_speed)*0.01f;
         state.ground_course     = wrap_360(swap_int16(_buffer.nav.ground_course)*0.01f);
         state.num_sats          = _buffer.nav.satellites;
@@ -202,50 +204,48 @@ AP_GPS_SIRF::_accumulate(uint8_t val)
 /*
   detect a SIRF GPS
  */
-bool AP_GPS_SIRF::_detect(struct SIRF_detect_state &state, uint8_t data)
+bool
+AP_GPS_SIRF::_detect(struct SIRF_detect_state &state, uint8_t data)
 {
-    switch (state.step) {
-    case 1:
-        if (PREAMBLE2 == data) {
-            state.step++;
-            break;
-        }
-        state.step = 0;
-        FALLTHROUGH;
-    case 0:
-        state.payload_length = state.payload_counter = state.checksum = 0;
-        if (PREAMBLE1 == data)
-            state.step++;
-        break;
-    case 2:
-        state.step++;
-        if (data != 0) {
-            // only look for short messages
-            state.step = 0;
-        }
-        break;
-    case 3:
-        state.step++;
-        state.payload_length = data;
-        break;
-    case 4:
-        state.checksum = (state.checksum + data) & 0x7fff;
-        if (++state.payload_counter == state.payload_length) {
-            state.step++;
-        }
-        break;
-    case 5:
-        state.step++;
-        if ((state.checksum >> 8) != data) {
-            state.step = 0;
-        }
-        break;
-    case 6:
-        state.step = 0;
-        if ((state.checksum & 0xff) == data) {
-            return true;
-        }
+	switch (state.step) {
+	case 1:
+		if (PREAMBLE2 == data) {
+			state.step++;
+			break;
+		}
+		state.step = 0;
+	case 0:
+		state.payload_length = state.payload_counter = state.checksum = 0;
+		if (PREAMBLE1 == data)
+			state.step++;
+		break;
+	case 2:
+		state.step++;
+		if (data != 0) {
+			// only look for short messages
+			state.step = 0;
+		}
+		break;
+	case 3:
+		state.step++;
+		state.payload_length = data;
+		break;
+	case 4:
+		state.checksum = (state.checksum + data) & 0x7fff;
+		if (++state.payload_counter == state.payload_length)
+			state.step++;
+		break;
+	case 5:
+		state.step++;
+		if ((state.checksum >> 8) != data) {
+			state.step = 0;
+		}
+		break;
+	case 6:
+		state.step = 0;
+		if ((state.checksum & 0xff) == data) {
+			return true;
+		}
     }
     return false;
 }
-#endif

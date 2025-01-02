@@ -18,8 +18,6 @@
 
 #include "SIM_CRRCSim.h"
 
-#if HAL_SIM_CRRCSIM_ENABLED
-
 #include <stdio.h>
 
 #include <AP_HAL/AP_HAL.h>
@@ -28,8 +26,8 @@ extern const AP_HAL::HAL& hal;
 
 namespace SITL {
 
-CRRCSim::CRRCSim(const char *frame_str) :
-    Aircraft(frame_str),
+CRRCSim::CRRCSim(const char *home_str, const char *frame_str) :
+    Aircraft(home_str, frame_str),
     last_timestamp(0),
     sock(true)
 {
@@ -121,9 +119,13 @@ void CRRCSim::recv_fdm(const struct sitl_input &input)
     gyro = Vector3f(pkt.rollRate, pkt.pitchRate, pkt.yawRate);
     velocity_ef = Vector3f(pkt.speedN, pkt.speedE, pkt.speedD);
 
-    origin.lat = pkt.latitude * 1.0e7;
-    origin.lng = pkt.longitude * 1.0e7;
-    position.xy().zero();
+    Location loc1, loc2;
+    loc2.lat = pkt.latitude * 1.0e7;
+    loc2.lng = pkt.longitude * 1.0e7;
+    memset(&loc1, 0, sizeof(loc1));
+    Vector2f posdelta = location_diff(loc1, loc2);
+    position.x = posdelta.x;
+    position.y = posdelta.y;
     position.z = -pkt.altitude;
 
     airspeed = pkt.airspeed;
@@ -149,12 +151,9 @@ void CRRCSim::update(const struct sitl_input &input)
     send_servos(input);
     recv_fdm(input);
     update_position();
-    time_advance();
 
     // update magnetic field
     update_mag_field_bf();
 }
 
 } // namespace SITL
-
-#endif  // HAL_SIM_CRRCSIM_ENABLED

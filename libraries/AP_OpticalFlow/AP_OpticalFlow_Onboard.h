@@ -14,24 +14,20 @@
  */
 #pragma once
 
-#include "AP_OpticalFlow_config.h"
+#include <AP_AHRS/AP_AHRS.h>
+#include <AP_Math/AP_Math.h>
+#include <AP_NavEKF2/AP_NavEKF2.h>
+#include <AP_NavEKF3/AP_NavEKF3.h>
 
-#if AP_OPTICALFLOW_ONBOARD_ENABLED
-
-#include <AP_OpticalFlow/AP_OpticalFlow_Backend.h>
-
-#include "AP_OpticalFlow.h"
+#include "OpticalFlow.h"
 
 class AP_OpticalFlow_Onboard : public OpticalFlow_backend
 {
 public:
-
-    using OpticalFlow_backend::OpticalFlow_backend;
-
-    void init(void) override;
-    void update(void) override;
+    AP_OpticalFlow_Onboard(OpticalFlow &_frontend);
+    void init(void);
+    void update(void);
 private:
+    void _get_gyro(float&, float&, float&);
     uint32_t _last_read_ms;
 };
-
-#endif  // AP_OPTICALFLOW_ONBOARD_ENABLED

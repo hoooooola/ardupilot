@@ -1,5 +1,21 @@
 #include "MsgHandler.h"
 
+void fatal(const char *msg) {
+    ::printf("%s",msg);
+    ::printf("\n");
+    exit(1);
+}
+
+char *xstrdup(const char *string)
+{
+    char *ret = strdup(string);
+    if (ret == NULL) {
+        perror("strdup");
+        fatal("strdup failed");
+    }
+    return ret;
+}
+
 void MsgHandler::add_field_type(char type, size_t size)
 {
     size_for_type_table[(type > 'A' ? (type-'A') : (type-'a'))] = size;
@@ -9,7 +25,7 @@ uint8_t MsgHandler::size_for_type(char type)
 {
     uint8_t ret = size_for_type_table[(uint8_t)(type > 'A' ? (type-'A') : (type-'a'))];
     if (ret == 0) {
-        ::printf("Unknown type (%c)\n", type);
+        ::fprintf(stderr, "Unknown type (%c)\n", type);
         abort();
     }
     return ret;
@@ -57,38 +73,29 @@ MsgHandler::MsgHandler(const struct log_Format &_f) : next_field(0), f(_f)
 void MsgHandler::add_field(const char *_label, uint8_t _type, uint8_t _offset,
                           uint8_t _length)
 {
-    field_info[next_field].label = strdup(_label);
+    field_info[next_field].label = xstrdup(_label);
     field_info[next_field].type = _type;
     field_info[next_field].offset = _offset;
     field_info[next_field].length = _length;
     next_field++;
 }
 
-static char *get_string_field(char *field, uint8_t fieldlen)
-{
-    char *ret = (char *)malloc(fieldlen+1);
-    memcpy(ret, field, fieldlen);
-    return ret;
-}
-
 void MsgHandler::parse_format_fields()
 {
-    char *labels = get_string_field(f.labels, sizeof(f.labels));
+    char *labels = xstrdup(f.labels);
     char * arg = labels;
     uint8_t label_offset = 0;
     char *next_label;
     uint8_t msg_offset = 3; // 3 bytes for the header
 
-    char *format = get_string_field(f.format, ARRAY_SIZE(f.format));
-
     while ((next_label = strtok(arg, ",")) != NULL) {
-        if (label_offset > strlen(format)) {
-            free(labels);
-            printf("too few field times for labels %s (format=%s) (labels=%s)\n",
-                   f.name, format, labels);
-            exit(1);
-        }
-        uint8_t field_type = format[label_offset];
+	if (label_offset > strlen(f.format)) {
+	    free(labels);
+	    printf("too few field times for labels %s (format=%s) (labels=%s)\n",
+		   f.name, f.format, f.labels);
+	    exit(1);
+	}
+        uint8_t field_type = f.format[label_offset];
         uint8_t length = size_for_type(field_type);
         add_field(next_label, field_type, msg_offset, length);
         arg = NULL;
@@ -96,13 +103,12 @@ void MsgHandler::parse_format_fields()
         label_offset++;
     }
 
-    if (label_offset != strlen(format)) {
+    if (label_offset != strlen(f.format)) {
         printf("too few labels for format (format=%s) (labels=%s)\n",
-               format, labels);
+               f.format, f.labels);
     }
 
     free(labels);
-    free(format);
 }
 
 bool MsgHandler::field_value(uint8_t *msg, const char *label, char *ret, uint8_t retlen)
@@ -152,7 +158,7 @@ bool MsgHandler::field_value(uint8_t *msg, const char *label, Vector3f &ret)
 }
 
 
-void MsgHandler::string_for_labels(char *buffer, uint32_t bufferlen)
+void MsgHandler::string_for_labels(char *buffer, uint bufferlen)
 {
     memset(buffer, '\0', bufferlen);
     bufferlen--;
@@ -180,6 +186,15 @@ void MsgHandler::string_for_labels(char *buffer, uint32_t bufferlen)
     }
 }
 
+MsgHandler::~MsgHandler()
+{
+    for (uint8_t k=0; k<LOGREADER_MAX_FIELDS; k++) {
+        if (field_info[k].label != NULL) {
+            free(field_info[k].label);
+        }
+    }
+}
+
 void MsgHandler::location_from_msg(uint8_t *msg,
                                   Location &loc,
                                   const char *label_lat,
@@ -188,7 +203,8 @@ void MsgHandler::location_from_msg(uint8_t *msg,
 {
     loc.lat = require_field_int32_t(msg, label_lat);
     loc.lng = require_field_int32_t(msg, label_long);
-    loc.set_alt_cm(require_field_int32_t(msg, label_alt), Location::AltFrame::ABSOLUTE);
+    loc.alt = require_field_int32_t(msg, label_alt);
+    loc.options = 0;
 }
 
 void MsgHandler::ground_vel_from_msg(uint8_t *msg,

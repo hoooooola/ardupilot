@@ -4,12 +4,8 @@
 ///         the downside being that it's a little slower as it internally uses a float
 ///         and it consumes an extra 4 bytes of memory to hold the constant gain
 
-#ifndef HAL_DEBUG_BUILD
-#define AP_INLINE_VECTOR_OPS
-#pragma GCC optimize("O2")
-#endif
+
 #include "LowPassFilter.h"
-#include <AP_InternalError/AP_InternalError.h>
 
 ////////////////////////////////////////////////////////////////////////////////////////////
 // DigitalLPF
@@ -24,44 +20,30 @@ DigitalLPF<T>::DigitalLPF() {
 // add a new raw value to the filter, retrieve the filtered result
 template <class T>
 T DigitalLPF<T>::apply(const T &sample, float cutoff_freq, float dt) {
-    if (is_negative(cutoff_freq) || is_negative(dt)) {
-        INTERNAL_ERROR(AP_InternalError::error_t::invalid_arg_or_result);
+    if (cutoff_freq <= 0.0f || dt <= 0.0f) {
         _output = sample;
-        return _output;
-    }
-    if (is_zero(cutoff_freq)) {
-        _output = sample;
-        return _output;
-    }
-    if (is_zero(dt)) {
         return _output;
     }
     float rc = 1.0f/(M_2PI*cutoff_freq);
     alpha = constrain_float(dt/(dt+rc), 0.0f, 1.0f);
     _output += (sample - _output) * alpha;
-    if (!initialised) {
-        initialised = true;
-        _output = sample;
-    }
     return _output;
 }
 
 template <class T>
 T DigitalLPF<T>::apply(const T &sample) {
     _output += (sample - _output) * alpha;
-    if (!initialised) {
-        initialised = true;
-        _output = sample;
-    }
     return _output;
 }
 
 template <class T>
 void DigitalLPF<T>::compute_alpha(float sample_freq, float cutoff_freq) {
-    if (sample_freq <= 0) {
-        alpha = 1;
+    if (cutoff_freq <= 0.0f || sample_freq <= 0.0f) {
+        alpha = 1.0;
     } else {
-        alpha = calc_lowpass_alpha_dt(1.0/sample_freq, cutoff_freq);
+        float dt = 1.0/sample_freq;
+        float rc = 1.0f/(M_2PI*cutoff_freq);
+        alpha = constrain_float(dt/(dt+rc), 0.0f, 1.0f);
     }
 }
 
@@ -73,8 +55,7 @@ const T &DigitalLPF<T>::get() const {
 
 template <class T>
 void DigitalLPF<T>::reset(T value) { 
-    _output = value;
-    initialised = true;
+    _output = value; 
 }
     
 ////////////////////////////////////////////////////////////////////////////////////////////

@@ -17,7 +17,6 @@
 #include "Thread.h"
 
 #include <alloca.h>
-#include <limits.h>
 #include <sys/types.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -25,6 +24,7 @@
 
 #include <AP_HAL/AP_HAL.h>
 #include <AP_Math/AP_Math.h>
+
 #include "Scheduler.h"
 
 #define STACK_POISON 0xBEBACAFE
@@ -39,10 +39,6 @@ void *Thread::_run_trampoline(void *arg)
     Thread *thread = static_cast<Thread *>(arg);
     thread->_poison_stack();
     thread->_run();
-
-    if (thread->_auto_free) {
-        delete thread;
-    }
 
     return nullptr;
 }
@@ -84,9 +80,7 @@ void Thread::_poison_stack()
     void *stackp;
     uint32_t *p, *curr, *begin, *end;
 
-    // `pthread_self` should be used here since _ctx could be not initialized
-    // in a race condition.
-    if (pthread_getattr_np(pthread_self(), &attr) != 0 ||
+    if (pthread_getattr_np(_ctx, &attr) != 0 ||
         pthread_attr_getstack(&attr, &stackp, &stack_size) != 0 ||
         pthread_attr_getguardsize(&attr, &guard_size) != 0) {
         return;
@@ -178,7 +172,7 @@ bool Thread::start(const char *name, int policy, int prio)
     if (geteuid() == 0) {
         if ((r = pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED)) != 0 ||
             (r = pthread_attr_setschedpolicy(&attr, policy)) != 0 ||
-            (r = pthread_attr_setschedparam(&attr, &param)) != 0) {
+            (r = pthread_attr_setschedparam(&attr, &param) != 0)) {
             AP_HAL::panic("Failed to set attributes for thread '%s': %s",
                           name, strerror(r));
         }
@@ -245,7 +239,7 @@ bool Thread::set_stack_size(size_t stack_size)
         return false;
     }
 
-    _stack_size = MAX(stack_size, (size_t) PTHREAD_STACK_MIN);
+    _stack_size = stack_size;
 
     return true;
 }

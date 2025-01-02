@@ -14,39 +14,33 @@
  */
 #pragma once
 
-#include "AP_Compass_config.h"
-
-#if AP_COMPASS_LIS3MDL_ENABLED
-
 #include <AP_Common/AP_Common.h>
 #include <AP_HAL/AP_HAL.h>
-#include <AP_HAL/Device.h>
+#include <AP_HAL/I2CDevice.h>
 #include <AP_Math/AP_Math.h>
 
 #include "AP_Compass.h"
 #include "AP_Compass_Backend.h"
 
 #ifndef HAL_COMPASS_LIS3MDL_I2C_ADDR
+// this can also be on 0x1e
 # define HAL_COMPASS_LIS3MDL_I2C_ADDR 0x1c
-#endif
-
-#ifndef HAL_COMPASS_LIS3MDL_I2C_ADDR2
-# define HAL_COMPASS_LIS3MDL_I2C_ADDR2 0x1e
 #endif
 
 class AP_Compass_LIS3MDL : public AP_Compass_Backend
 {
 public:
-    static AP_Compass_Backend *probe(AP_HAL::OwnPtr<AP_HAL::Device> dev,
-                                     bool force_external,
-                                     enum Rotation rotation);
+    static AP_Compass_Backend *probe(Compass &compass,
+                                     AP_HAL::OwnPtr<AP_HAL::I2CDevice> dev,
+                                     bool force_external = false,
+                                     enum Rotation rotation = ROTATION_NONE);
 
     void read() override;
 
     static constexpr const char *name = "LIS3MDL";
 
 private:
-    AP_Compass_LIS3MDL(AP_HAL::OwnPtr<AP_HAL::Device> dev,
+    AP_Compass_LIS3MDL(Compass &compass, AP_HAL::OwnPtr<AP_HAL::Device> dev,
                        bool force_external,
                        enum Rotation rotation);
 
@@ -56,11 +50,11 @@ private:
      * Device periodic callback to read data from the sensor.
      */
     bool init();
-    void timer();
+    bool timer();
 
     uint8_t compass_instance;
+    Vector3f accum;
+    uint16_t accum_count;
     bool force_external;
     enum Rotation rotation;
 };
-
-#endif  // AP_COMPASS_LIS3MDL_ENABLED

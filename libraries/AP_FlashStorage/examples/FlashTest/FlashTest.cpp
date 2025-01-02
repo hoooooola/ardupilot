@@ -6,7 +6,6 @@
 #include <AP_Math/AP_Math.h>
 #include <AP_FlashStorage/AP_FlashStorage.h>
 #include <stdio.h>
-#include <AP_HAL/utility/sparse-endian.h>
 
 const AP_HAL::HAL& hal = AP_HAL::get_HAL();
 
@@ -23,7 +22,7 @@ private:
     uint8_t mem_mirror[AP_FlashStorage::storage_size];
 
     // flash buffer
-    uint8_t *flash[2];
+    uint8_t flash[2][flash_sector_size];
 
     bool flash_write(uint8_t sector, uint32_t offset, const uint8_t *data, uint16_t length);
     bool flash_read(uint8_t sector, uint32_t offset, uint8_t *data, uint16_t length);
@@ -55,34 +54,8 @@ bool FlashTest::flash_write(uint8_t sector, uint32_t offset, const uint8_t *data
                       (unsigned)length);
     }
     uint8_t *b = &flash[sector][offset];
-    if ((offset & 1) || (length & 1)) {
-        AP_HAL::panic("FATAL: invalid write at %u:%u len=%u\n",
-                      (unsigned)sector,
-                      (unsigned)offset,
-                      (unsigned)length);
-    }
-    uint16_t len16 = length/2;
-    for (uint16_t i=0; i<len16; i++) {
-        const uint16_t v = le16toh_ptr(&data[i*2]);
-        uint16_t v2 = le16toh_ptr(&b[i*2]);
-        if (v & !v2) {
-            AP_HAL::panic("FATAL: invalid write16 at %u:%u 0x%04x 0x%04x\n",
-                          (unsigned)sector,
-                          unsigned(offset+i),
-                          b[i],
-                          data[i]);
-        }
-#ifndef AP_FLASHSTORAGE_MULTI_WRITE
-        if (v != v2 && v != 0xFFFF && v2 != 0xFFFF) {
-            AP_HAL::panic("FATAL: invalid write16 at %u:%u 0x%04x 0x%04x\n",
-                          (unsigned)sector,
-                          unsigned(offset+i),
-                          b[i],
-                          data[i]);
-        }
-#endif
-        v2 &= v;
-        put_le16_ptr(&b[i*2], v2);
+    for (uint16_t i=0; i<length; i++) {
+        b[i] &= data[i];
     }
     return true;
 }
@@ -132,15 +105,9 @@ void FlashTest::write(uint16_t offset, const uint8_t *data, uint16_t length)
  */
 void FlashTest::setup(void)
 {
-    hal.console->printf("AP_FlashStorage test\n");
-}
-
-void FlashTest::loop(void)
-{
-    flash[0] = (uint8_t *)malloc(flash_sector_size);
-    flash[1] = (uint8_t *)malloc(flash_sector_size);
     flash_erase(0);
     flash_erase(1);
+    hal.console->printf("AP_FlashStorage test\n");
 
     if (!storage.init()) {
         AP_HAL::panic("Failed first init()");
@@ -161,7 +128,7 @@ void FlashTest::loop(void)
 
         if (erase_ok) {
             if (memcmp(mem_buffer, mem_mirror, sizeof(mem_buffer)) != 0) {
-                AP_HAL::panic("FATAL: data mis-match at i=%u", (unsigned)i);
+                AP_HAL::panic("FATAL: data mis-match at i=%u", i);
             }
         }
     }
@@ -185,10 +152,12 @@ void FlashTest::loop(void)
     if (memcmp(mem_buffer, mem_mirror, sizeof(mem_buffer)) != 0) {
         AP_HAL::panic("FATAL: data mis-match");
     }
-    while (true) {
-        hal.console->printf("TEST PASSED");
-        hal.scheduler->delay(20000);
-    }
+    AP_HAL::panic("TEST PASSED");
+}
+
+void FlashTest::loop(void)
+{
+    hal.console->printf("loop\n");
 }
 
 FlashTest flashtest;

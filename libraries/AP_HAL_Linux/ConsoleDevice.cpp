@@ -8,7 +8,6 @@
 
 #include "ConsoleDevice.h"
 
-#include <AP_Vehicle/AP_Vehicle_Type.h>
 
 ConsoleDevice::ConsoleDevice()
 {
@@ -28,13 +27,6 @@ bool ConsoleDevice::close()
 
 bool ConsoleDevice::open()
 {
-#if APM_BUILD_TYPE(APM_BUILD_Replay)
-    // we do not want a ConsoleDevice for Replay or any examples.  It
-    // screws up the terminal settings and creates all sorts of
-    // weirdnesses in Replay's output.
-    return false;
-#endif
-
     _rd_fd = STDIN_FILENO;
     _wr_fd = STDOUT_FILENO;
 
@@ -50,7 +42,7 @@ bool ConsoleDevice::open()
 
 bool ConsoleDevice::_set_signal_handlers(void) const
 {
-    struct sigaction sa {};
+    struct sigaction sa;
     sigemptyset(&sa.sa_mask);
     sa.sa_handler = SIG_IGN;
 

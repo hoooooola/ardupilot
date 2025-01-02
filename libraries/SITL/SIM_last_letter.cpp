@@ -18,8 +18,6 @@
 
 #include "SIM_last_letter.h"
 
-#if HAL_SIM_LAST_LETTER_ENABLED
-
 #include <fcntl.h>
 #include <stdio.h>
 #include <sys/stat.h>
@@ -31,10 +29,11 @@ extern const AP_HAL::HAL& hal;
 
 namespace SITL {
 
-last_letter::last_letter(const char *_frame_str) :
-    Aircraft(_frame_str),
+last_letter::last_letter(const char *home_str, const char *_frame_str) :
+    Aircraft(home_str, _frame_str),
     last_timestamp_us(0),
-    sock(true)
+    sock(true),
+    frame_str(_frame_str)
 {
     // try to bind to a specific port so that if we restart ArduPilot
     // last_letter keeps sending us packets. Not strictly necessary but
@@ -131,11 +130,8 @@ void last_letter::update(const struct sitl_input &input)
     sync_frame_time();
 
     update_position();
-    time_advance();
     // update magnetic field
     update_mag_field_bf();
 }
 
 } // namespace SITL
-
-#endif  // HAL_SIM_LAST_LETTER_ENABLED

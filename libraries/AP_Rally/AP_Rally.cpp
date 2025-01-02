@@ -2,29 +2,32 @@
 /// @brief   Handles rally point storage and retrieval.
 #include "AP_Rally.h"
 
-#include <AP_AHRS/AP_AHRS.h>
-#include <AP_Logger/AP_Logger.h>
-#include <StorageManager/StorageManager.h>
-#include <AP_Vehicle/AP_Vehicle_Type.h>
+#include <AP_HAL/AP_HAL.h>
+extern const AP_HAL::HAL& hal;
 
-#if HAL_RALLY_ENABLED
 // storage object
 StorageAccess AP_Rally::_storage(StorageManager::StorageRally);
 
-assert_storage_size<RallyLocation, 15> _assert_storage_size_RallyLocation;
+// ArduCopter/defines.h sets this, and this definition will be moved into ArduPlane/defines.h when that is patched to use the lib
+#ifdef APM_BUILD_DIRECTORY
+  #if APM_BUILD_TYPE(APM_BUILD_ArduCopter)
+    #define RALLY_LIMIT_KM_DEFAULT 0.3f
+    #define RALLY_INCLUDE_HOME_DEFAULT 1
+  #elif APM_BUILD_TYPE(APM_BUILD_ArduPlane)
+    #define RALLY_LIMIT_KM_DEFAULT 5.0f
+    #define RALLY_INCLUDE_HOME_DEFAULT 0
+  #elif APM_BUILD_TYPE(APM_BUILD_APMrover2)
+    #define RALLY_LIMIT_KM_DEFAULT 0.5f
+    #define RALLY_INCLUDE_HOME_DEFAULT 0
+  #endif
+#endif  // APM_BUILD_DIRECTORY
 
-#if APM_BUILD_COPTER_OR_HELI
-  #define RALLY_LIMIT_KM_DEFAULT 0.3f
-  #define RALLY_INCLUDE_HOME_DEFAULT 1
-#elif APM_BUILD_TYPE(APM_BUILD_ArduPlane)
-  #define RALLY_LIMIT_KM_DEFAULT 5.0f
-  #define RALLY_INCLUDE_HOME_DEFAULT 0
-#elif APM_BUILD_TYPE(APM_BUILD_Rover)
-  #define RALLY_LIMIT_KM_DEFAULT 0.5f
-  #define RALLY_INCLUDE_HOME_DEFAULT 1
-#else
-  #define RALLY_LIMIT_KM_DEFAULT 1.0f
-  #define RALLY_INCLUDE_HOME_DEFAULT 0
+#ifndef RALLY_LIMIT_KM_DEFAULT
+#define RALLY_LIMIT_KM_DEFAULT 1.0f
+#endif
+
+#ifndef RALLY_INCLUDE_HOME_DEFAULT
+#define RALLY_INCLUDE_HOME_DEFAULT 0
 #endif
 
 const AP_Param::GroupInfo AP_Rally::var_info[] = {
@@ -38,7 +41,7 @@ const AP_Param::GroupInfo AP_Rally::var_info[] = {
     // @DisplayName: Rally Limit
     // @Description: Maximum distance to rally point. If the closest rally point is more than this number of kilometers from the current position and the home location is closer than any of the rally points from the current position then do RTL to home rather than to the closest rally point. This prevents a leftover rally point from a different airfield being used accidentally. If this is set to 0 then the closest rally point is always used.
     // @User: Advanced
-    // @Units: km
+    // @Units: kilometers
     // @Increment: 0.1
     AP_GROUPINFO("LIMIT_KM", 1, AP_Rally, _rally_limit_km, RALLY_LIMIT_KM_DEFAULT),
 
@@ -53,14 +56,10 @@ const AP_Param::GroupInfo AP_Rally::var_info[] = {
 };
 
 // constructor
-AP_Rally::AP_Rally()
+AP_Rally::AP_Rally(AP_AHRS &ahrs) 
+    : _ahrs(ahrs)
+    , _last_change_time_ms(0xFFFFFFFF)
 {
-#if CONFIG_HAL_BOARD == HAL_BOARD_SITL
-    if (_singleton != nullptr) {
-        AP_HAL::panic("Rally must be singleton");
-    }
-#endif
-    _singleton = this;
     AP_Param::setup_object_defaults(this, var_info);
 }
 
@@ -80,26 +79,6 @@ bool AP_Rally::get_rally_point_with_index(uint8_t i, RallyLocation &ret) const
     return true; 
 }
 
-void AP_Rally::truncate(uint8_t num)
-{
-    if (num > _rally_point_total_count) {
-        // we never make the space larger this way
-        return;
-    }
-    _rally_point_total_count.set_and_save_ifchanged(num);
-}
-
-bool AP_Rally::append(const RallyLocation &loc)
-{
-    const uint8_t current_total = get_rally_total();
-    _rally_point_total_count.set_and_save_ifchanged(current_total + 1);
-    if (!set_rally_point_with_index(current_total, loc)) {
-        _rally_point_total_count.set_and_save_ifchanged(current_total);
-        return false;
-    }
-    return true;
-}
-
 // save a rally point to EEPROM - this assumes that the RALLY_TOTAL param has been incremented beforehand, which is the case in Mission Planner
 bool AP_Rally::set_rally_point_with_index(uint8_t i, const RallyLocation &rallyLoc)
 {
@@ -115,25 +94,24 @@ bool AP_Rally::set_rally_point_with_index(uint8_t i, const RallyLocation &rallyL
 
     _last_change_time_ms = AP_HAL::millis();
 
-    AP::logger().Write_RallyPoint(_rally_point_total_count, i, rallyLoc);
-
     return true;
 }
 
 // helper function to translate a RallyLocation to a Location
 Location AP_Rally::rally_location_to_location(const RallyLocation &rally_loc) const
 {
-    //Relative altitudes are relative to HOME point's altitude:
-    Location ret {
-        rally_loc.lat,
-        rally_loc.lng,
-        rally_loc.alt * 100,
-        Location::AltFrame::ABOVE_HOME
-    };
+    Location ret = {};
 
-    // notionally the following call can fail, but we have no facility
-    // to return that fact here:
-    ret.change_alt_frame(Location::AltFrame::ABSOLUTE);
+    // we return an absolute altitude, as we add homeloc.alt below
+    ret.flags.relative_alt = false;
+
+    //Currently can't do true AGL on the APM.  Relative altitudes are
+    //relative to HOME point's altitude.  Terrain on the board is inbound
+    //for the PX4, though.  This line will need to be updated when that happens:
+    ret.alt = (rally_loc.alt*100UL) + _ahrs.get_home().alt;
+
+    ret.lat = rally_loc.lat;
+    ret.lng = rally_loc.lng;
 
     return ret;
 }
@@ -142,6 +120,7 @@ Location AP_Rally::rally_location_to_location(const RallyLocation &rally_loc) co
 bool AP_Rally::find_nearest_rally_point(const Location &current_loc, RallyLocation &return_loc) const
 {
     float min_dis = -1;
+    const struct Location &home_loc = _ahrs.get_home();
 
     for (uint8_t i = 0; i < (uint8_t) _rally_point_total_count; i++) {
         RallyLocation next_rally;
@@ -149,7 +128,7 @@ bool AP_Rally::find_nearest_rally_point(const Location &current_loc, RallyLocati
             continue;
         }
         Location rally_loc = rally_location_to_location(next_rally);
-        float dis = current_loc.get_distance(rally_loc);
+        float dis = get_distance(current_loc, rally_loc);
 
         if (is_valid(rally_loc) && (dis < min_dis || min_dis < 0)) {
             min_dis = dis;
@@ -157,8 +136,13 @@ bool AP_Rally::find_nearest_rally_point(const Location &current_loc, RallyLocati
         }
     }
 
+    // if home is included, return false (meaning use home) if it is closer than all rally points
+    if (_rally_incl_home && (get_distance(current_loc, home_loc) < min_dis)) {
+        return false;
+    }
+
     // if a limit is defined and all rally points are beyond that limit, use home if it is closer
-    if ((_rally_limit_km > 0) && (min_dis > _rally_limit_km*1000.0f)) {
+    if ((_rally_limit_km > 0) && (min_dis > _rally_limit_km*1000.0f) && (get_distance(current_loc, home_loc) < min_dis)) {
         return false; // use home position
     }
 
@@ -167,33 +151,21 @@ bool AP_Rally::find_nearest_rally_point(const Location &current_loc, RallyLocati
 }
 
 // return best RTL location from current position
-Location AP_Rally::calc_best_rally_or_home_location(const Location &current_loc, float rtl_home_alt_amsl_cm) const
+Location AP_Rally::calc_best_rally_or_home_location(const Location &current_loc, float rtl_home_alt) const
 {
-    // if no valid rally point, return home position:
-    Location return_loc { AP::ahrs().get_home() };
-    return_loc.set_alt_cm(rtl_home_alt_amsl_cm, Location::AltFrame::ABSOLUTE);
-
-    RallyLocation ral_loc;
+    RallyLocation ral_loc = {};
+    Location return_loc = {};
+    const struct Location &home_loc = _ahrs.get_home();
+    
     if (find_nearest_rally_point(current_loc, ral_loc)) {
-        Location loc = rally_location_to_location(ral_loc);
-        // use the rally point if it's closer then home, or we aren't generally considering home as acceptable
-        if (!_rally_incl_home  || (current_loc.get_distance(loc) < current_loc.get_distance(return_loc))) {
-            return_loc = rally_location_to_location(ral_loc);
-        }
+        // valid rally point found
+        return_loc = rally_location_to_location(ral_loc);
+    } else {
+        // no valid rally point, return home position
+        return_loc = home_loc;
+        return_loc.alt = rtl_home_alt;
+        return_loc.flags.relative_alt = false; // read_alt_to_hold returns an absolute altitude
     }
 
     return return_loc;
 }
-
-// singleton instance
-AP_Rally *AP_Rally::_singleton;
-
-namespace AP {
-
-AP_Rally *rally()
-{
-    return AP_Rally::get_singleton();
-}
-
-}
-#endif //HAL_RALLY_ENABLED

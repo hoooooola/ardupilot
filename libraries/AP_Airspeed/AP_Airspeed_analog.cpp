@@ -16,22 +16,19 @@
  *   analog airspeed driver
  */
 
-#include "AP_Airspeed_analog.h"
-
-#if AP_AIRSPEED_ANALOG_ENABLED
-
 #include <AP_HAL/AP_HAL.h>
 #include <AP_Common/AP_Common.h>
 
 #include "AP_Airspeed.h"
+#include "AP_Airspeed_analog.h"
 
 extern const AP_HAL::HAL &hal;
 
 // scaling for 3DR analog airspeed sensor
 #define VOLTS_TO_PASCAL 819
 
-AP_Airspeed_Analog::AP_Airspeed_Analog(AP_Airspeed &_frontend, uint8_t _instance) :
-    AP_Airspeed_Backend(_frontend, _instance)
+AP_Airspeed_Analog::AP_Airspeed_Analog(AP_Airspeed &_frontend) :
+    AP_Airspeed_Backend(_frontend)
 {
     _source = hal.analogin->channel(get_pin());
 }
@@ -44,12 +41,11 @@ bool AP_Airspeed_Analog::init()
 // read the airspeed sensor
 bool AP_Airspeed_Analog::get_differential_pressure(float &pressure)
 {
-    // allow pin to change
-    if (_source == nullptr || !_source->set_pin(get_pin())) {
+    if (_source == nullptr) {
         return false;
     }
+    // allow pin to change
+    _source->set_pin(get_pin());
     pressure = _source->voltage_average_ratiometric() * VOLTS_TO_PASCAL / get_psi_range();
     return true;
 }
-
-#endif  // AP_AIRSPEED_ANALOG_ENABLED

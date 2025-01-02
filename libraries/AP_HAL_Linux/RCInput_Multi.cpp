@@ -18,8 +18,7 @@
 
 #include <AP_HAL/AP_HAL.h>
 
-#if CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_DISCO || \
-    CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_BLUE
+#if CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_DISCO
 #include "RCInput_Multi.h"
 
 extern const AP_HAL::HAL& hal;
@@ -59,7 +58,7 @@ void RCInput_Multi::_timer_tick(void)
         if (inputs[i]->new_input()) {
             inputs[i]->read(_pwm_values, inputs[i]->num_channels());
             _num_channels = inputs[i]->num_channels();
-            rc_input_count++;
+            new_rc_input = true;
         }        
     }
 }

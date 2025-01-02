@@ -14,15 +14,12 @@
  */
 #pragma once
 
-#include <AP_HAL/AP_HAL_Boards.h>
-
-#ifndef HAL_RALLY_ENABLED
-#define HAL_RALLY_ENABLED 1
-#endif
-
 #include <AP_Common/AP_Common.h>
-#include <AP_Common/Location.h>
 #include <AP_Param/AP_Param.h>
+#include <AP_AHRS/AP_AHRS.h>
+#include <StorageManager/StorageManager.h>
+
+#define AP_RALLY_WP_SIZE        15  // eeprom size of rally points
 
 struct PACKED RallyLocation {
     int32_t lat;        //Latitude * 10^7
@@ -38,36 +35,22 @@ struct PACKED RallyLocation {
 /// @class    AP_Rally
 /// @brief    Object managing Rally Points
 class AP_Rally {
-public:
-    AP_Rally();
 
-    /* Do not allow copies */
-    CLASS_NO_COPY(AP_Rally);
+public:
+    AP_Rally(AP_AHRS &ahrs);
 
     // data handling
     bool get_rally_point_with_index(uint8_t i, RallyLocation &ret) const;
     bool set_rally_point_with_index(uint8_t i, const RallyLocation &rallyLoc);
-    uint8_t get_rally_total() const {
-        return (uint8_t)_rally_point_total_count;
-    }
-    uint8_t get_rally_max(void) const {
-        const uint16_t ret = _storage.size() / uint16_t(sizeof(RallyLocation));
-        if (ret > 255) {
-            return 255;
-        }
-        return (uint8_t)ret;
-    }
-    // reduce point count:
-    void truncate(uint8_t num);
-    // append a rally point to the list
-    bool append(const RallyLocation &loc) WARN_IF_UNUSED;
+    uint8_t get_rally_total() const { return _rally_point_total_count; }
+    uint8_t get_rally_max(void) const { return _storage.size() / AP_RALLY_WP_SIZE; }
 
     float get_rally_limit_km() const { return _rally_limit_km; }
-
+    
     Location rally_location_to_location(const RallyLocation &ret) const;
 
     // logic handling
-    Location calc_best_rally_or_home_location(const Location &current_loc, float rtl_home_alt_amsl_cm) const;
+    Location calc_best_rally_or_home_location(const Location &current_loc, float rtl_home_alt) const;
     bool find_nearest_rally_point(const Location &myloc, RallyLocation &ret) const;
 
     // last time rally points changed
@@ -76,25 +59,18 @@ public:
     // parameter block
     static const struct AP_Param::GroupInfo var_info[];
 
-    // get singleton instance
-    static AP_Rally *get_singleton() { return _singleton; }
-
-
 private:
-    static AP_Rally *_singleton;
-
     virtual bool is_valid(const Location &rally_point) const { return true; }
 
     static StorageAccess _storage;
+
+    // internal variables
+    const AP_AHRS& _ahrs; // used only for home position
 
     // parameters
     AP_Int8  _rally_point_total_count;
     AP_Float _rally_limit_km;
     AP_Int8  _rally_incl_home;
 
-    uint32_t _last_change_time_ms = 0xFFFFFFFF;
-};
-
-namespace AP {
-    AP_Rally *rally();
+    uint32_t _last_change_time_ms;
 };

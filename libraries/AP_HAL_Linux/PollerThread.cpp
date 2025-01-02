@@ -41,7 +41,9 @@ void TimerPollable::on_can_read()
         _wrapper->start_cb();
     }
 
-    _cb();
+    if (!_cb()) {
+        _removeme = true;
+    }
 
     if (_wrapper) {
         _wrapper->end_cb();
@@ -76,8 +78,8 @@ bool TimerPollable::adjust_timer(uint32_t timeout_usec)
 
     struct itimerspec spec = { };
 
-    spec.it_interval.tv_nsec = timeout_usec * AP_NSEC_PER_USEC;
-    spec.it_value.tv_nsec = timeout_usec * AP_NSEC_PER_USEC;
+    spec.it_interval.tv_nsec = timeout_usec * NSEC_PER_USEC;
+    spec.it_value.tv_nsec = timeout_usec * NSEC_PER_USEC;
 
     if (timerfd_settime(_fd, 0, &spec, nullptr) < 0) {
         return false;

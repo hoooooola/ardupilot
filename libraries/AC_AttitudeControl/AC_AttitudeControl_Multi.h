@@ -11,13 +11,13 @@
   # define AC_ATC_MULTI_RATE_RP_P           0.135f
 #endif
 #ifndef AC_ATC_MULTI_RATE_RP_I
-  # define AC_ATC_MULTI_RATE_RP_I           0.135f
+  # define AC_ATC_MULTI_RATE_RP_I           0.090f
 #endif
 #ifndef AC_ATC_MULTI_RATE_RP_D
   # define AC_ATC_MULTI_RATE_RP_D           0.0036f
 #endif
 #ifndef AC_ATC_MULTI_RATE_RP_IMAX
- # define AC_ATC_MULTI_RATE_RP_IMAX         0.5f
+ # define AC_ATC_MULTI_RATE_RP_IMAX         0.444f
 #endif
 #ifndef AC_ATC_MULTI_RATE_RP_FILT_HZ
  # define AC_ATC_MULTI_RATE_RP_FILT_HZ      20.0f
@@ -32,24 +32,24 @@
  # define AC_ATC_MULTI_RATE_YAW_D           0.0f
 #endif
 #ifndef AC_ATC_MULTI_RATE_YAW_IMAX
- # define AC_ATC_MULTI_RATE_YAW_IMAX        0.5f
+ # define AC_ATC_MULTI_RATE_YAW_IMAX        0.222f
 #endif
 #ifndef AC_ATC_MULTI_RATE_YAW_FILT_HZ
- # define AC_ATC_MULTI_RATE_YAW_FILT_HZ     2.5f
+ # define AC_ATC_MULTI_RATE_YAW_FILT_HZ     5.0f
 #endif
 
 
 class AC_AttitudeControl_Multi : public AC_AttitudeControl {
 public:
-	AC_AttitudeControl_Multi(AP_AHRS_View &ahrs, const AP_MultiCopter &aparm, AP_MotorsMulticopter& motors);
+	AC_AttitudeControl_Multi(AP_AHRS &ahrs, const AP_Vehicle::MultiCopter &aparm, AP_MotorsMulticopter& motors, float dt);
 
 	// empty destructor to suppress compiler warning
 	virtual ~AC_AttitudeControl_Multi() {}
 
     // pid accessors
-    AC_PID& get_rate_roll_pid() override { return _pid_rate_roll; }
-    AC_PID& get_rate_pitch_pid() override { return _pid_rate_pitch; }
-    AC_PID& get_rate_yaw_pid() override { return _pid_rate_yaw; }
+    AC_PID& get_rate_roll_pid() { return _pid_rate_roll; }
+    AC_PID& get_rate_pitch_pid() { return _pid_rate_pitch; }
+    AC_PID& get_rate_yaw_pid() { return _pid_rate_yaw; }
 
     // Update Alt_Hold angle maximum
     void update_althold_lean_angle_max(float throttle_in) override;
@@ -63,28 +63,23 @@ public:
     // set desired throttle vs attitude mixing (actual mix is slewed towards this value over 1~2 seconds)
     //  low values favour pilot/autopilot throttle over attitude control, high values favour attitude control over throttle
     //  has no effect when throttle is above hover throttle
-    void set_throttle_mix_min() override { _throttle_rpy_mix_desired = _thr_mix_min; }
-    void set_throttle_mix_man() override { _throttle_rpy_mix_desired = _thr_mix_man; }
-    void set_throttle_mix_max(float ratio) override;
-    void set_throttle_mix_value(float value) override { _throttle_rpy_mix_desired = _throttle_rpy_mix = value; }
-    float get_throttle_mix(void) const override { return _throttle_rpy_mix; }
+    void set_throttle_mix_min() { _throttle_rpy_mix_desired = _thr_mix_min; }
+    void set_throttle_mix_mid() { _throttle_rpy_mix_desired = AC_ATTITUDE_CONTROL_MID_DEFAULT; }
+    void set_throttle_mix_max() { _throttle_rpy_mix_desired = _thr_mix_max; }
 
-    // are we producing min throttle?
-    bool is_throttle_mix_min() const override { return (_throttle_rpy_mix < 1.25f * _thr_mix_min); }
+    // get_throttle_rpy_mix - get low throttle compensation value
+    bool is_throttle_mix_min() const { return (_throttle_rpy_mix < 1.25f*_thr_mix_min); }
 
     // run lowest level body-frame rate controller and send outputs to the motors
-    void rate_controller_run() override;
+    void rate_controller_run();
 
     // sanity check parameters.  should be called once before take-off
-    void parameter_sanity_check() override;
+    void parameter_sanity_check();
 
     // user settable parameters
     static const struct AP_Param::GroupInfo var_info[];
 
 protected:
-
-    // boost angle_p/pd each cycle on high throttle slew
-    void update_throttle_gain_boost();
 
     // update_throttle_rpy_mix - updates thr_low_comp value towards the target
     void update_throttle_rpy_mix();
@@ -97,10 +92,6 @@ protected:
     AC_PID                _pid_rate_pitch;
     AC_PID                _pid_rate_yaw;
 
-    AP_Float              _thr_mix_man;     // throttle vs attitude control prioritisation used when using manual throttle (higher values mean we prioritise attitude control over throttle)
     AP_Float              _thr_mix_min;     // throttle vs attitude control prioritisation used when landing (higher values mean we prioritise attitude control over throttle)
     AP_Float              _thr_mix_max;     // throttle vs attitude control prioritisation used during active flight (higher values mean we prioritise attitude control over throttle)
-
-    // angle_p/pd boost multiplier
-    AP_Float              _throttle_gain_boost;
 };

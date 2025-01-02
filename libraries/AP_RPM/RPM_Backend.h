@@ -14,15 +14,15 @@
  */
 #pragma once
 
+#include <AP_Common/AP_Common.h>
+#include <AP_HAL/AP_HAL.h>
 #include "AP_RPM.h"
-
-#if AP_RPM_ENABLED
 
 class AP_RPM_Backend
 {
 public:
     // constructor. This incorporates initialisation as well.
-    AP_RPM_Backend(AP_RPM &_ap_rpm, uint8_t instance, AP_RPM::RPM_State &_state);
+	AP_RPM_Backend(AP_RPM &_ap_rpm, uint8_t instance, AP_RPM::RPM_State &_state);
 
     // we declare a virtual destructor so that RPM drivers can
     // override with a custom destructor if need be
@@ -31,19 +31,8 @@ public:
     // update the state structure. All backends must implement this.
     virtual void update() = 0;
 
-    int8_t get_pin(void) const {
-        if (state.instance >= RPM_MAX_INSTANCES) {
-            return -1;
-        }
-        return ap_rpm._params[state.instance].pin.get();
-    }
-
-    void update_esc_telem_outbound();
-
 protected:
 
     AP_RPM &ap_rpm;
     AP_RPM::RPM_State &state;
 };
-
-#endif   // AP_RPM_ENABLED

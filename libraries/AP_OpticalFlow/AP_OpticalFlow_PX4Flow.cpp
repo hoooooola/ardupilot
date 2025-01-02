@@ -16,29 +16,28 @@
   driver for PX4Flow optical flow sensor
  */
 
-#include "AP_OpticalFlow_config.h"
-
-#if AP_OPTICALFLOW_PX4FLOW_ENABLED
-
-#include "AP_OpticalFlow_PX4Flow.h"
-
 #include <AP_HAL/AP_HAL.h>
-#include <AP_Math/crc.h>
+#include "AP_OpticalFlow_PX4Flow.h"
+#include <AP_Math/edc.h>
 #include <AP_AHRS/AP_AHRS.h>
 #include <AP_HAL/I2CDevice.h>
 #include <utility>
-#include "AP_OpticalFlow.h"
+#include "OpticalFlow.h"
 #include <stdio.h>
-#include <AP_BoardConfig/AP_BoardConfig.h>
 
 extern const AP_HAL::HAL& hal;
 
-#define PX4FLOW_BASE_I2C_ADDR   0x42
-#define PX4FLOW_INIT_RETRIES    10      // attempt to initialise the sensor up to 10 times at startup
+#define PX4FLOW_BASE_I2C_ADDR 0x42
+
+// constructor
+AP_OpticalFlow_PX4Flow::AP_OpticalFlow_PX4Flow(OpticalFlow &_frontend) :
+    OpticalFlow_backend(_frontend)
+{
+}
 
 
 // detect the device
-AP_OpticalFlow_PX4Flow *AP_OpticalFlow_PX4Flow::detect(AP_OpticalFlow &_frontend)
+AP_OpticalFlow_PX4Flow *AP_OpticalFlow_PX4Flow::detect(OpticalFlow &_frontend)
 {
     AP_OpticalFlow_PX4Flow *sensor = new AP_OpticalFlow_PX4Flow(_frontend);
     if (!sensor) {
@@ -56,39 +55,30 @@ AP_OpticalFlow_PX4Flow *AP_OpticalFlow_PX4Flow::detect(AP_OpticalFlow &_frontend
  */
 bool AP_OpticalFlow_PX4Flow::scan_buses(void)
 {
-    bool success = false;
-    uint8_t retry_attempt = 0;
-
-    while (!success && retry_attempt < PX4FLOW_INIT_RETRIES) {
-        bool all_external = (AP_BoardConfig::get_board_type() == AP_BoardConfig::PX4_BOARD_PIXHAWK2);
-        uint32_t bus_mask = all_external? hal.i2c_mgr->get_bus_mask() : hal.i2c_mgr->get_bus_mask_external();
-        FOREACH_I2C_MASK(bus, bus_mask) {
-    #ifdef HAL_OPTFLOW_PX4FLOW_I2C_BUS
-            // only one bus from HAL
-            if (bus != HAL_OPTFLOW_PX4FLOW_I2C_BUS) {
-                continue;
-            }
-    #endif
-            AP_HAL::OwnPtr<AP_HAL::Device> tdev = hal.i2c_mgr->get_device(bus, PX4FLOW_BASE_I2C_ADDR + get_address());
-            if (!tdev) {
-                continue;
-            }
-            WITH_SEMAPHORE(tdev->get_semaphore());
-
-            struct i2c_integral_frame frame;
-            success = tdev->read_registers(REG_INTEGRAL_FRAME, (uint8_t *)&frame, sizeof(frame));
-            if (success) {
-                printf("Found PX4Flow on bus %u\n", bus);
-                dev = std::move(tdev);
-                break;
-            }
+    for (uint8_t bus=0; bus<2; bus++) {
+#ifdef HAL_OPTFLOW_PX4FLOW_I2C_BUS
+        // only one bus from HAL
+        if (bus != HAL_OPTFLOW_PX4FLOW_I2C_BUS) {
+            continue;
         }
-        retry_attempt++;
-        if (!success) {
-            hal.scheduler->delay(10);
+#endif
+        AP_HAL::OwnPtr<AP_HAL::Device> tdev = hal.i2c_mgr->get_device(bus, PX4FLOW_BASE_I2C_ADDR + get_bus_id());
+        if (!tdev) {
+            continue;
+        }
+        if (!tdev->get_semaphore()->take(0)) {
+            continue;
+        }
+        struct i2c_integral_frame frame;
+        bool ok = tdev->read_registers(REG_INTEGRAL_FRAME, (uint8_t *)&frame, sizeof(frame));
+        tdev->get_semaphore()->give();
+        if (ok) {
+            printf("Found PX4Flow on bus %u\n", bus);
+            dev = std::move(tdev);
+            break;
         }
     }
-    return success;
+    return !!dev;
 }
 
 // setup the device
@@ -98,7 +88,7 @@ bool AP_OpticalFlow_PX4Flow::setup_sensor(void)
         return false;
     }
     // read at 10Hz
-    dev->register_periodic_callback(100000, FUNCTOR_BIND_MEMBER(&AP_OpticalFlow_PX4Flow::timer, void));
+    dev->register_periodic_callback(100000, FUNCTOR_BIND_MEMBER(&AP_OpticalFlow_PX4Flow::timer, bool));
     return true;
 }
 
@@ -109,13 +99,14 @@ void AP_OpticalFlow_PX4Flow::update(void)
 }
 
 // timer to read sensor
-void AP_OpticalFlow_PX4Flow::timer(void)
+bool AP_OpticalFlow_PX4Flow::timer(void)
 {
     struct i2c_integral_frame frame;
     if (!dev->read_registers(REG_INTEGRAL_FRAME, (uint8_t *)&frame, sizeof(frame))) {
-        return;
+        return true;
     }
-    struct AP_OpticalFlow::OpticalFlow_state state {};
+    struct OpticalFlow::OpticalFlow_state state {};
+    state.device_id = get_bus_id();
 
     if (frame.integration_timespan > 0) {
         const Vector2f flowScaler = _flowScaler();
@@ -133,6 +124,6 @@ void AP_OpticalFlow_PX4Flow::timer(void)
     }
 
     _update_frontend(state);
+    
+    return true;
 }
-
-#endif  // AP_OPTICALFLOW_PX4FLOW_ENABLED

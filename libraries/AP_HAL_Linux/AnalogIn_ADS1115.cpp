@@ -6,13 +6,12 @@ AnalogSource_ADS1115::AnalogSource_ADS1115(int16_t pin):
 {
 }
 
-bool AnalogSource_ADS1115::set_pin(uint8_t pin)
+void AnalogSource_ADS1115::set_pin(uint8_t pin)
 {
     if (_pin == pin) {
-        return true;
+        return;
     }
     _pin = pin;
-    return true;
 }
 
 float AnalogSource_ADS1115::read_average()
@@ -50,7 +49,6 @@ AnalogIn_ADS1115::AnalogIn_ADS1115()
 
 AP_HAL::AnalogSource* AnalogIn_ADS1115::channel(int16_t pin)
 {
-    WITH_SEMAPHORE(_semaphore);
     for (uint8_t j = 0; j < _channels_number; j++) {
         if (_channels[j] == nullptr) {
             _channels[j] = new AnalogSource_ADS1115(pin);
@@ -58,7 +56,7 @@ AP_HAL::AnalogSource* AnalogIn_ADS1115::channel(int16_t pin)
         }
     }
 
-    hal.console->printf("Out of analog channels\n");
+    hal.console->println("Out of analog channels");
     return nullptr;
 }
 
@@ -66,7 +64,9 @@ void AnalogIn_ADS1115::init()
 {
     _adc->init();
 
+    hal.scheduler->suspend_timer_procs();
     hal.scheduler->register_timer_process(FUNCTOR_BIND_MEMBER(&AnalogIn_ADS1115::_update, void));
+    hal.scheduler->resume_timer_procs();
 }
 
 void AnalogIn_ADS1115::_update()

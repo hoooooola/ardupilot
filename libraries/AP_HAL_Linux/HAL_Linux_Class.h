@@ -14,10 +14,3 @@ public:
 protected:
     bool _should_exit = false;
 };
-
-#if HAL_NUM_CAN_IFACES
-namespace Linux {
-    class CANIface;
-}
-typedef Linux::CANIface HAL_CANIface;
-#endif

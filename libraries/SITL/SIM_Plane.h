@@ -29,14 +29,14 @@ namespace SITL {
  */
 class Plane : public Aircraft {
 public:
-    Plane(const char *frame_str);
+    Plane(const char *home_str, const char *frame_str);
 
     /* update model by one time step */
-    virtual void update(const struct sitl_input &input) override;
+    virtual void update(const struct sitl_input &input);
 
     /* static object creator */
-    static Aircraft *create(const char *frame_str) {
-        return new Plane(frame_str);
+    static Aircraft *create(const char *home_str, const char *frame_str) {
+        return new Plane(home_str, frame_str);
     }
 
 protected:
@@ -95,36 +95,16 @@ protected:
     bool reverse_thrust;
     bool elevons;
     bool vtail;
-    bool dspoilers;
     bool reverse_elevator_rudder;
     bool ice_engine;
-    bool tailsitter;
-    bool aerobatic;
-    bool copter_tailsitter;
-    bool have_launcher;
-    float launch_accel;
-    float launch_time;
-    uint64_t launch_start_ms;
 
-    const uint8_t throttle_servo = 2;
-    const int8_t choke_servo = 14;
-    const int8_t ignition_servo = 12;
-    const int8_t starter_servo = 13;
-    const float slewrate = 100;
-    ICEngine icengine{
-        throttle_servo,
-        choke_servo,
-        ignition_servo,
-        starter_servo,
-        slewrate,
-        true
-    };
+    ICEngine icengine{2, 14, 12, 13, 100};
 
     float liftCoeff(float alpha) const;
     float dragCoeff(float alpha) const;
     Vector3f getForce(float inputAileron, float inputElevator, float inputRudder) const;
-    Vector3f getTorque(float inputAileron, float inputElevator, float inputRudder, float inputThrust, const Vector3f &force) const;
-    void calculate_forces(const struct sitl_input &input, Vector3f &rot_accel);
+    Vector3f getTorque(float inputAileron, float inputElevator, float inputRudder, const Vector3f &force) const;
+    void calculate_forces(const struct sitl_input &input, Vector3f &rot_accel, Vector3f &body_accel);
 };
 
 } // namespace SITL

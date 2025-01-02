@@ -1,5 +1,3 @@
-#!/bin/bash
-
 if [ "`echo $1`" = "load" ]; then
     echo "Loading Test_Capes..."
     cp devicetree/pxf/BB-SPI0-PXF-01-00A0.dtbo /lib/firmware/

@@ -1,12 +1,9 @@
 #pragma once
 
-#include "AC_PrecLand_config.h"
-
-#if AC_PRECLAND_SITL_ENABLED
-
-#include <AC_PrecLand/AC_PrecLand_Backend.h>
+#if CONFIG_HAL_BOARD == HAL_BOARD_SITL
+#include <AP_Common/AP_Common.h>
 #include <AP_Math/AP_Math.h>
-#include <SITL/SITL.h>
+#include <AC_PrecLand/AC_PrecLand_Backend.h>
 
 /*
  * AC_PrecLand_SITL - supplies vectors to a fake landing target
@@ -17,33 +14,28 @@ class AC_PrecLand_SITL : public AC_PrecLand_Backend
 public:
 
     // Constructor
-    using AC_PrecLand_Backend::AC_PrecLand_Backend;
+    AC_PrecLand_SITL(const AC_PrecLand& frontend, AC_PrecLand::precland_state& state);
 
     // perform any required initialisation of backend
-    void init() override;
+    void init();
 
     // retrieve updates from sensor
-    void update() override;
+    void update();
 
     // provides a unit vector towards the target in body frame
     //  returns same as have_los_meas()
-    bool get_los_body(Vector3f& ret) override;
+    bool get_los_body(Vector3f& ret);
 
     // returns system time in milliseconds of last los measurement
-    uint32_t los_meas_time_ms() override { return _los_meas_time_ms; }
+    uint32_t los_meas_time_ms() { return _los_meas_time_ms; }
 
     // return true if there is a valid los measurement available
-    bool have_los_meas() override;
-
-    // returns distance to target in meters (0 means distance is not known)
-    float distance_to_target() override { return _distance_to_target; }
+    bool have_los_meas();
 
 private:
-    SITL::SIM           *_sitl;                 // sitl instance pointer
+
     Vector3f            _los_meas_body;         // unit vector in body frame pointing towards target
     uint32_t            _los_meas_time_ms;      // system time in milliseconds when los was measured
-    bool                _have_los_meas;         // true if there is a valid measurement from the camera
-    float               _distance_to_target;    // distance to target in meters
 };
 
-#endif  // AC_PRECLAND_SITL_ENABLED
+#endif

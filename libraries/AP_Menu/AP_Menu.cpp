@@ -104,7 +104,7 @@ Menu::_run_command(bool prompt_on_enter)
         if (_argv[argc].str == nullptr || '\0' == _argv[argc].str[0])
             break;
         _argv[argc].i = atol(_argv[argc].str);
-        _argv[argc].f = strtof(_argv[argc].str, NULL);
+        _argv[argc].f = atof(_argv[argc].str);      // calls strtod, > 700B !
         argc++;
     }
     
@@ -152,7 +152,7 @@ Menu::_run_command(bool prompt_on_enter)
 
     if (cmd_found==false)
     {
-        _port->printf("Invalid command, type 'help'\n");
+        _port->println("Invalid command, type 'help'");
     }
 
     return false;
@@ -223,7 +223,7 @@ Menu::_help(void)
 {
     int i;
 
-    _port->printf("Commands:\n");
+    _port->println("Commands:");
     for (i = 0; i < _entries; i++) {
 		hal.scheduler->delay(10);
         _port->printf("  %s\n", _commands[i].command);

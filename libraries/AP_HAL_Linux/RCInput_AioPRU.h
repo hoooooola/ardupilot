@@ -17,11 +17,7 @@
 
 #include "AP_HAL_Linux.h"
 
-#if CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_POCKET
-#define RCIN_PRUSS_RAM_BASE   0x4a301000
-#else
 #define RCIN_PRUSS_RAM_BASE   0x4a303000
-#endif
 
 // we use 300 ring buffer entries to guarantee that a full 25 byte
 // frame of 12 bits per byte
@@ -30,8 +26,8 @@ namespace Linux {
 
 class RCInput_AioPRU : public RCInput {
 public:
-    void init() override;
-    void _timer_tick(void) override;
+    void init();
+    void _timer_tick(void);
 
 protected:
     static const uint32_t TICK_PER_US = 200;

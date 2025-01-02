@@ -16,9 +16,10 @@
    by Mirko Denecke <mirkix@gmail.com>
  */
 
-#include "AP_RangeFinder_BBB_PRU.h"
+#include <AP_HAL/AP_HAL.h>
+#if CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_BBBMINI
 
-#if AP_RANGEFINDER_BBB_PRU_ENABLED
+#include "AP_RangeFinder_BBB_PRU.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,12 +35,21 @@ extern const AP_HAL::HAL& hal;
 volatile struct range *rangerpru;
 
 /*
+   The constructor also initialises the rangefinder. Note that this
+   constructor is not called until detect() returns true, so we
+   already know that we should setup the rangefinder
+*/
+AP_RangeFinder_BBB_PRU::AP_RangeFinder_BBB_PRU(RangeFinder &_ranger, uint8_t instance, RangeFinder::RangeFinder_State &_state) :
+    AP_RangeFinder_Backend(_ranger, instance, _state)
+{
+}
+
+/*
    Stop PRU, load firmware (check if firmware is present), start PRU.
    If we get a result the sensor seems to be there.
 */
-bool AP_RangeFinder_BBB_PRU::detect()
+bool AP_RangeFinder_BBB_PRU::detect(RangeFinder &_ranger, uint8_t instance)
 {
-    //The constructor is called when the detect() method returns true, more on this in the header file
     bool result = true;
     uint32_t mem_fd;
     uint32_t *ctrl;
@@ -55,11 +65,13 @@ bool AP_RangeFinder_BBB_PRU::detect()
 
     // Load firmware (.text)
     FILE *file = fopen("/lib/firmware/rangefinderprutext.bin", "rb");
-    if (file == nullptr) {
+    if(file == nullptr)
+    {
         result = false;
     }
 
-    if (fread(ram, PRU0_IRAM_SIZE, 1, file) != 1) {
+    if(fread(ram, PRU0_IRAM_SIZE, 1, file) != 1)
+    {
         result = false;
     }
 
@@ -71,11 +83,13 @@ bool AP_RangeFinder_BBB_PRU::detect()
 
     // Load firmware (.data)
     file = fopen("/lib/firmware/rangefinderprudata.bin", "rb");
-    if (file == nullptr) {
+    if(file == nullptr)
+    {
         result = false;
     }
 
-    if (fread(ram, PRU0_DRAM_SIZE, 1, file) != 1) {
+    if(fread(ram, PRU0_DRAM_SIZE, 1, file) != 1)
+    {
         result = false;
     }
 
@@ -100,8 +114,7 @@ bool AP_RangeFinder_BBB_PRU::detect()
 */
 void AP_RangeFinder_BBB_PRU::update(void)
 {
-    state.status = (RangeFinder::Status)rangerpru->status;
-    state.distance_m = rangerpru->distance * 0.01f;
-    state.last_reading_ms = AP_HAL::millis();
+    state.status = (RangeFinder::RangeFinder_Status)rangerpru->status;
+    state.distance_cm = rangerpru->distance;
 }
-#endif // AP_RANGEFINDER_BBB_PRU_ENABLED
+#endif // CONFIG_HAL_BOARD_SUBTYPE

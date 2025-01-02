@@ -22,8 +22,8 @@ class AP_BattMonitor_Bebop :public AP_BattMonitor_Backend
 {
 public:
     // constructor. This incorporates initialisation as well.
-    AP_BattMonitor_Bebop(AP_BattMonitor &mon, AP_BattMonitor::BattMonitor_State &mon_state, AP_BattMonitor_Params &params):
-        AP_BattMonitor_Backend(mon, mon_state, params),
+    AP_BattMonitor_Bebop(AP_BattMonitor &mon, uint8_t instance, AP_BattMonitor::BattMonitor_State &mon_state):
+        AP_BattMonitor_Backend(mon, instance, mon_state),
         _prev_vbat_raw(0.0f),
         _prev_vbat(0.0f),
         _battery_voltage_max(0.0f)
@@ -32,16 +32,10 @@ public:
     virtual ~AP_BattMonitor_Bebop(void) {};
 
     // initialise
-    void init() override;
+    void init();
 
     // read the latest battery voltage
-    void read() override;
-
-    // bebop provides current info
-    bool has_current() const override { return true; };
-
-    // don't allow reset of remaining capacity for bebop battery
-    bool reset_remaining(float percentage) override { return false; }
+    void read();
 
 private:
     float _prev_vbat_raw;

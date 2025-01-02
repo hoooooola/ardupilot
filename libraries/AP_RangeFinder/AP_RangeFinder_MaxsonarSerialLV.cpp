@@ -15,27 +15,43 @@
  * with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "AP_RangeFinder_MaxsonarSerialLV.h"
-
-#if AP_RANGEFINDER_MAXBOTIX_SERIAL_ENABLED
-
 #include <AP_HAL/AP_HAL.h>
+#include <AP_SerialManager/AP_SerialManager.h>
 #include <ctype.h>
+#include "AP_RangeFinder_MaxsonarSerialLV.h"
 
 #define MAXSONAR_SERIAL_LV_BAUD_RATE 9600
 
 extern const AP_HAL::HAL& hal;
 
-AP_RangeFinder_MaxsonarSerialLV::AP_RangeFinder_MaxsonarSerialLV(
-    RangeFinder::RangeFinder_State &_state,
-    AP_RangeFinder_Params &_params):
-    AP_RangeFinder_Backend_Serial(_state, _params)
+/* 
+   The constructor also initialises the rangefinder. Note that this
+   constructor is not called until detect() returns true, so we
+   already know that we should setup the rangefinder
+*/
+AP_RangeFinder_MaxsonarSerialLV::AP_RangeFinder_MaxsonarSerialLV(RangeFinder &_ranger, uint8_t instance,
+                                                                 RangeFinder::RangeFinder_State &_state,
+                                                                 AP_SerialManager &serial_manager) :
+    AP_RangeFinder_Backend(_ranger, instance, _state)
 {
-    params.scaling.set_default(0.0254f);
+    uart = serial_manager.find_serial(AP_SerialManager::SerialProtocol_Lidar, 0);
+    if (uart != nullptr) {
+        uart->begin(serial_manager.find_baudrate(AP_SerialManager::SerialProtocol_Lidar, 0));
+    }
+}
+
+/* 
+   detect if a MaxSonar rangefinder is connected. We'll detect by
+   trying to take a reading on Serial. If we get a result the sensor is
+   there.
+*/
+bool AP_RangeFinder_MaxsonarSerialLV::detect(RangeFinder &_ranger, uint8_t instance, AP_SerialManager &serial_manager)
+{
+    return serial_manager.find_serial(AP_SerialManager::SerialProtocol_Lidar, 0) != nullptr;
 }
 
 // read - return last value measured by sensor
-bool AP_RangeFinder_MaxsonarSerialLV::get_reading(float &reading_m)
+bool AP_RangeFinder_MaxsonarSerialLV::get_reading(uint16_t &reading_cm)
 {
     if (uart == nullptr) {
         return false;
@@ -65,10 +81,22 @@ bool AP_RangeFinder_MaxsonarSerialLV::get_reading(float &reading_m)
         return false;
     }
 
-    // This sonar gives the metrics in inches, so we have to transform this to meters
-    reading_m = params.scaling * (float(sum) / count);
+    // This sonar gives the metrics in inches, so we have to transform this to centimeters
+    reading_cm = 2.54f * sum / count;
 
     return true;
 }
 
-#endif  // AP_RANGEFINDER_MAXBOTIX_SERIAL_ENABLED
+/* 
+   update the state of the sensor
+*/
+void AP_RangeFinder_MaxsonarSerialLV::update(void)
+{
+    if (get_reading(state.distance_cm)) {
+        // update range_valid state based on distance measured
+        last_reading_ms = AP_HAL::millis();
+        update_status();
+    } else if (AP_HAL::millis() - last_reading_ms > 500) {
+        set_status(RangeFinder::RangeFinder_NoData);
+    }
+}

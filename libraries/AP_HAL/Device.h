@@ -30,11 +30,7 @@ public:
         BUS_TYPE_UNKNOWN = 0,
         BUS_TYPE_I2C     = 1,
         BUS_TYPE_SPI     = 2,
-        BUS_TYPE_UAVCAN  = 3,
-        BUS_TYPE_SITL    = 4,
-        BUS_TYPE_MSP     = 5,
-        BUS_TYPE_SERIAL  = 6,
-        BUS_TYPE_WSPI    = 7,
+        BUS_TYPE_UAVCAN  = 3
     };
 
     enum Speed {
@@ -42,25 +38,8 @@ public:
         SPEED_LOW,
     };
 
-    // Used for comms with devices that support wide SPI
-    // like quad spi
-    struct CommandHeader {
-        uint32_t  cmd; //Command phase data.
-        uint32_t  cfg; //Transfer configuration field.
-        uint32_t  addr; //Address phase data.
-        uint32_t  alt; // Alternate phase data.
-        uint32_t  dummy; // Number of dummy cycles to be inserted.
-    };
-
-    FUNCTOR_TYPEDEF(PeriodicCb, void);
+    FUNCTOR_TYPEDEF(PeriodicCb, bool);
     typedef void* PeriodicHandle;
-
-    // Register Read Write Callback
-    // returns: void parameters: register address, register data, register datasize, direction R:false, W:true
-    FUNCTOR_TYPEDEF(RegisterRWCb, void, uint8_t, uint8_t*, uint32_t, bool);
-    typedef void* RegisterRWHandle;
-
-    FUNCTOR_TYPEDEF(BankSelectCb, bool, uint8_t);
 
     Device(enum BusType type)
     {
@@ -76,7 +55,7 @@ public:
     uint8_t bus_num(void) const {
         return _bus_id.devid_s.bus;
     }
-
+    
     // return 24 bit bus identifier
     uint32_t get_bus_id(void) const {
         return _bus_id.devid;
@@ -86,20 +65,19 @@ public:
     uint8_t get_bus_address(void) const {
         return _bus_id.devid_s.address;
     }
-
+    
     // set device type within a device class (eg. AP_COMPASS_TYPE_LSM303D)
-    void set_device_type(uint8_t devtype);
-
+    void set_device_type(uint8_t devtype) {
+        _bus_id.devid_s.devtype = devtype;
+    }
+    
+    
     virtual ~Device() {
-        delete[] _checked.regs;
+        if (_checked.regs != nullptr) {
+            delete[] _checked.regs;
+        }
     }
 
-    /*
-     * Change device address. Note that this is the 7 bit address, it
-     * does not include the bit for read/write. Only works on I2C
-     */
-    virtual void set_address(uint8_t address) {};
-    
     /*
      * Set the speed of future transfers. Depending on the bus the speed may
      * be shared for all devices on the same bus.
@@ -118,21 +96,6 @@ public:
     virtual bool transfer(const uint8_t *send, uint32_t send_len,
                           uint8_t *recv, uint32_t recv_len) = 0;
 
-
-    /*
-     * Sets the required flags before transaction starts
-     * this is to be used by Wide SPI communication interfaces like
-     * Dual/Quad/Octo SPI
-     */
-    virtual void set_cmd_header(const CommandHeader& cmd_hdr) {}
-
-    /*
-     * Sets up peripheral for execution in place mode
-     * Only relevant for Wide SPI setup.
-     */
-    virtual bool enter_xip_mode(void** map_ptr) { return false; }
-    virtual bool exit_xip_mode() { return false; }
-
     /**
      * Wrapper function over #transfer() to read recv_len registers, starting
      * by first_reg, into the array pointed by recv. The read flag passed to
@@ -141,54 +104,40 @@ public:
      *
      * Return: true on a successful transfer, false on failure.
      */
-    bool read_registers(uint8_t first_reg, uint8_t *recv, uint32_t recv_len);
+    bool read_registers(uint8_t first_reg, uint8_t *recv, uint32_t recv_len)
+    {
+        first_reg |= _read_flag;
+        return transfer(&first_reg, 1, recv, recv_len);
+    }
 
+    /**
+     * read 16 bit unsigned integer, little endian
+     *
+     * Return: true on a successful transfer, false on failure.
+     */
+    bool read_uint16_le(uint8_t first_reg, uint16_t &value);
+
+    /**
+     * read 16 bit unsigned integer, big endian
+     *
+     * Return: true on a successful transfer, false on failure.
+     */
+    bool read_uint16_be(uint8_t first_reg, uint16_t &value);
+    
     /**
      * Wrapper function over #transfer() to write a byte to the register reg.
      * The transfer is done by sending reg and val in that order.
      *
      * Return: true on a successful transfer, false on failure.
      */
-    bool write_register(uint8_t reg, uint8_t val, bool checked=false);
-    
-    /*
-     * Sets a callback to be called when a register is read or written.
-     */
-    virtual void set_register_rw_callback(RegisterRWCb register_rw_callback) {
-        _register_rw_callback = register_rw_callback;
+    bool write_register(uint8_t reg, uint8_t val, bool checked=false)
+    {
+        uint8_t buf[2] = { reg, val };
+        if (checked) {
+            set_checked_register(reg, val);
+        }
+        return transfer(buf, sizeof(buf), nullptr, 0);
     }
-
-    /**
-     * Wrapper function over #transfer() to call bank selection callback
-     * and then invoke the transfer call
-     *
-     * Return: true on a successful transfer, false on failure.
-     */
-    bool transfer_bank(uint8_t bank, const uint8_t *send, uint32_t send_len,
-                          uint8_t *recv, uint32_t recv_len);
-
-    /**
-     * Wrapper function over #transfer_bank() to read recv_len registers, starting
-     * by first_reg, into the array pointed by recv. The read flag passed to
-     * #set_read_flag(uint8_t) is ORed with first_reg before performing the
-     * transfer.
-     *
-     * Return: true on a successful transfer, false on failure.
-     */
-    bool read_bank_registers(uint8_t bank, uint8_t first_reg, uint8_t *recv, uint32_t recv_len);
-
-    /**
-     * Wrapper function over #transfer_bank() to write a byte to the register reg.
-     * The transfer is done by sending reg and val in that order.
-     *
-     * Return: true on a successful transfer, false on failure.
-     */
-    bool write_bank_register(uint8_t bank, uint8_t reg, uint8_t val, bool checked=false);
-
-    /**
-     * set a value for a checked register in a bank
-     */
-    void set_checked_register(uint8_t bank, uint8_t reg, uint8_t val);
 
     /**
      * set a value for a checked register
@@ -206,20 +155,6 @@ public:
      * or register checking has not been setup
      */
     bool check_next_register(void);
-
-    // checked registers
-    struct checkreg {
-        uint8_t bank;
-        uint8_t regnum;
-        uint8_t value;
-    };
-    
-    /**
-     * check next register value for correctness, with return of
-     * failure value. Return false if value is incorrect or register
-     * checking has not been setup
-     */
-    bool check_next_register(struct checkreg &fail);
     
     /**
      * Wrapper function over #transfer() to read a sequence of bytes from
@@ -258,7 +193,7 @@ public:
      * #register_periodic_callback. Note that the time will be re-calculated
      * from the moment this call is made and expire after @period_usec.
      *
-     * Return: true if periodic callback was successfully adjusted, false otherwise.
+     * Return: true if periodic callback was sucessfully adjusted, false otherwise.
      */
     virtual bool adjust_periodic_callback(PeriodicHandle h, uint32_t period_usec) = 0;
 
@@ -271,75 +206,58 @@ public:
     virtual bool unregister_callback(PeriodicHandle h) { return false; }
 
     /*
-     * Sets a bank_select callback to be used for bank selection during register check
-     */
-    virtual void setup_bankselect_callback(BankSelectCb bank_select) {
-        _bank_select = bank_select;
-    }
-
-    /*
-     * Sets a bank_select callback to be used for bank selection during register check
-     */
-    virtual void deregister_bankselect_callback() {
-        _bank_select = nullptr;
-    }
-
-
-    /*
-        allows to set callback that will be called after DMA transfer complete.
-        if this callback is set then any read/write operation will return directly after transfer setup and
-        bus semaphore must not be released until register_completion_callback(0) called from callback itself
-    */
-    virtual void register_completion_callback(AP_HAL::MemberProc proc) {}
-    virtual void register_completion_callback(AP_HAL::Proc proc) {}
-    
-    /*
      * support for direct control of SPI chip select. Needed for
      * devices with unusual SPI transfer patterns that include
      * specific delays
      */
     virtual bool set_chip_select(bool set) { return false; }
-
+    
     /**
      * Some devices connected on the I2C or SPI bus require a bit to be set on
      * the register address in order to perform a read operation. This sets a
      * flag to be used by #read_registers(). The flag's default value is zero.
      */
-    void set_read_flag(uint8_t flag);
+    void set_read_flag(uint8_t flag)
+    {
+        _read_flag = flag;
+    }
+
 
     /**
      * make a bus id given bus type, bus number, bus address and
      * device type This is for use by devices that do not use one of
      * the standard HAL Device types, such as UAVCAN devices
      */
-    static uint32_t make_bus_id(enum BusType bus_type, uint8_t bus, uint8_t address, uint8_t devtype);
+    static uint32_t make_bus_id(enum BusType bus_type, uint8_t bus, uint8_t address, uint8_t devtype) {
+        union DeviceId d;
+        d.devid_s.bus_type = bus_type;
+        d.devid_s.bus = bus;
+        d.devid_s.address = address;
+        d.devid_s.devtype = devtype;
+        return d.devid;
+    }
 
     /**
      * return a new bus ID for the same bus connection but a new device type.
-     * This is used for auxiliary bus connections
+     * This is used for auxillary bus connections
      */
-    static uint32_t change_bus_id(uint32_t old_id, uint8_t devtype);
+    static uint32_t change_bus_id(uint32_t old_id, uint8_t devtype) {
+        union DeviceId d;
+        d.devid = old_id;
+        d.devid_s.devtype = devtype;
+        return d.devid;
+    }
 
     /**
      * return bus ID with a new devtype
      */
-    uint32_t get_bus_id_devtype(uint8_t devtype) const;
-
-    /**
-     * get bus type
-     */
-    static enum BusType devid_get_bus_type(uint32_t dev_id);
-
-    static uint8_t devid_get_bus(uint32_t dev_id);
-
-    static uint8_t devid_get_address(uint32_t dev_id);
-
-    static uint8_t devid_get_devtype(uint32_t dev_id);
-
+    uint32_t get_bus_id_devtype(uint8_t devtype) {
+        return change_bus_id(get_bus_id(), devtype);
+    }
 
     /* set number of retries on transfers */
     virtual void set_retries(uint8_t retries) {};
-
+    
 protected:
     uint8_t _read_flag = 0;
 
@@ -360,7 +278,7 @@ protected:
         struct DeviceStructure devid_s;
         uint32_t devid;
     };
-
+    
     union DeviceId _bus_id;
 
     // set device address (eg. i2c bus address or spi CS)
@@ -374,15 +292,17 @@ protected:
     }
 
 private:
-    BankSelectCb _bank_select;
-    RegisterRWCb _register_rw_callback;
+    // checked registers
+    struct checkreg {
+        uint8_t regnum;
+        uint8_t value;
+    };
     struct {
         uint8_t n_allocated;
         uint8_t n_set;
         uint8_t next;
         uint8_t frequency;
         uint8_t counter;
-        struct checkreg last_reg_fail;
         struct checkreg *regs;
     } _checked;
 };

@@ -19,13 +19,19 @@
 
 #include <utility>
 
+#include <AP_HAL_Linux/GPIO.h>
+
 extern const AP_HAL::HAL &hal;
 
+#if CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_RASPILOT
+#define LSM9DS0_DRY_X_PIN RPI_GPIO_17
+#define LSM9DS0_DRY_G_PIN RPI_GPIO_6
+#else
 #define LSM9DS0_DRY_X_PIN -1
 #define LSM9DS0_DRY_G_PIN -1
+#endif
 
-#define LSM9DS0_G_WHOAMI    0xD4 // L3GD20
-#define LSM9DS0_G_WHOAMI_H  0xD7 // L3GD20H
+#define LSM9DS0_G_WHOAMI    0xD4
 #define LSM9DS0_XM_WHOAMI   0x49
 
 ////////////////////////////
@@ -372,13 +378,12 @@ extern const AP_HAL::HAL &hal;
 #define ACT_DUR                                       0x3F
 
 AP_InertialSensor_LSM9DS0::AP_InertialSensor_LSM9DS0(AP_InertialSensor &imu,
-                                                     AP_HAL::OwnPtr<AP_HAL::Device> dev_gyro,
-                                                     AP_HAL::OwnPtr<AP_HAL::Device> dev_accel,
+                                                     AP_HAL::OwnPtr<AP_HAL::SPIDevice> dev_gyro,
+                                                     AP_HAL::OwnPtr<AP_HAL::SPIDevice> dev_accel,
                                                      int drdy_pin_num_a,
                                                      int drdy_pin_num_g,
                                                      enum Rotation rotation_a,
-                                                     enum Rotation rotation_g,
-                                                     enum Rotation rotation_gH)
+                                                     enum Rotation rotation_g)
     : AP_InertialSensor_Backend(imu)
     , _dev_gyro(std::move(dev_gyro))
     , _dev_accel(std::move(dev_accel))
@@ -386,17 +391,14 @@ AP_InertialSensor_LSM9DS0::AP_InertialSensor_LSM9DS0(AP_InertialSensor &imu,
     , _drdy_pin_num_g(drdy_pin_num_g)
     , _rotation_a(rotation_a)
     , _rotation_g(rotation_g)
-    , _rotation_gH(rotation_gH)
-    , _temp_filter(400, 1)
 {
 }
 
 AP_InertialSensor_Backend *AP_InertialSensor_LSM9DS0::probe(AP_InertialSensor &_imu,
-                                                            AP_HAL::OwnPtr<AP_HAL::Device> dev_gyro,
-                                                            AP_HAL::OwnPtr<AP_HAL::Device> dev_accel,
+                                                            AP_HAL::OwnPtr<AP_HAL::SPIDevice> dev_gyro,
+                                                            AP_HAL::OwnPtr<AP_HAL::SPIDevice> dev_accel,
                                                             enum Rotation rotation_a,
-                                                            enum Rotation rotation_g,
-                                                            enum Rotation rotation_gH)
+                                                            enum Rotation rotation_g)
 {
     if (!dev_gyro || !dev_accel) {
         return nullptr;
@@ -404,7 +406,7 @@ AP_InertialSensor_Backend *AP_InertialSensor_LSM9DS0::probe(AP_InertialSensor &_
     AP_InertialSensor_LSM9DS0 *sensor =
         new AP_InertialSensor_LSM9DS0(_imu, std::move(dev_gyro), std::move(dev_accel),
                                       LSM9DS0_DRY_X_PIN, LSM9DS0_DRY_G_PIN,
-                                      rotation_a, rotation_g, rotation_gH);
+                                      rotation_a, rotation_g);
     if (!sensor || !sensor->_init_sensor()) {
         delete sensor;
         return nullptr;
@@ -450,21 +452,26 @@ bool AP_InertialSensor_LSM9DS0::_init_sensor()
 
 bool AP_InertialSensor_LSM9DS0::_hardware_init()
 {
-    _spi_sem->take_blocking();
+    if (!_spi_sem->take(HAL_SEMAPHORE_BLOCK_FOREVER)) {
+        return false;
+    }
 
-    uint8_t tries, whoami;
+    uint8_t whoami;
+    uint8_t tries;
 
     // set flag for reading registers
     _dev_gyro->set_read_flag(0x80);
     _dev_accel->set_read_flag(0x80);
     
-    whoami_g = _register_read_g(WHO_AM_I_G);
-    if (whoami_g != LSM9DS0_G_WHOAMI && whoami_g != LSM9DS0_G_WHOAMI_H) {
+    whoami = _register_read_g(WHO_AM_I_G);
+    if (whoami != LSM9DS0_G_WHOAMI) {
+        hal.console->printf("LSM9DS0: unexpected gyro WHOAMI 0x%x\n", (unsigned)whoami);
         goto fail_whoami;
     }
 
     whoami = _register_read_xm(WHO_AM_I_XM);
     if (whoami != LSM9DS0_XM_WHOAMI) {
+        hal.console->printf("LSM9DS0: unexpected acc/mag  WHOAMI 0x%x\n", (unsigned)whoami);
         goto fail_whoami;
     }
 
@@ -492,7 +499,7 @@ bool AP_InertialSensor_LSM9DS0::_hardware_init()
 #endif
     }
     if (tries == 5) {
-        DEV_PRINTF("Failed to boot LSM9DS0 5 times\n\n");
+        hal.console->println("Failed to boot LSM9DS0 5 times\n");
         goto fail_tries;
     }
 
@@ -512,22 +519,16 @@ fail_whoami:
  */
 void AP_InertialSensor_LSM9DS0::start(void)
 {
-    if (!_imu.register_gyro(_gyro_instance, 760, _dev_gyro->get_bus_id_devtype(DEVTYPE_GYR_L3GD20)) ||
-        !_imu.register_accel(_accel_instance, 1000, _dev_accel->get_bus_id_devtype(DEVTYPE_ACC_LSM303D))) {
-        return;
-    }
+    _gyro_instance = _imu.register_gyro(760, _dev_gyro->get_bus_id_devtype(DEVTYPE_GYR_L3GD20));
+    _accel_instance = _imu.register_accel(800, _dev_accel->get_bus_id_devtype(DEVTYPE_ACC_LSM303D));
 
-    if (whoami_g == LSM9DS0_G_WHOAMI_H) {
-        set_gyro_orientation(_gyro_instance, _rotation_gH);
-    } else {
-        set_gyro_orientation(_gyro_instance, _rotation_g);
-    }
+    set_gyro_orientation(_gyro_instance, _rotation_g);
     set_accel_orientation(_accel_instance, _rotation_a);
     
     _set_accel_max_abs_offset(_accel_instance, 5.0f);
 
     /* start the timer process to read samples */
-    _dev_gyro->register_periodic_callback(1000, FUNCTOR_BIND_MEMBER(&AP_InertialSensor_LSM9DS0::_poll_data, void));
+    _dev_gyro->register_periodic_callback(1000, FUNCTOR_BIND_MEMBER(&AP_InertialSensor_LSM9DS0::_poll_data, bool));
 }
 
 
@@ -642,9 +643,6 @@ void AP_InertialSensor_LSM9DS0::_accel_init()
     /* Accel data ready on INT1 */
     _register_write_xm(CTRL_REG3_XM, CTRL_REG3_XM_P1_DRDYA, true);
     hal.scheduler->delay(1);
-
-    // enable temperature sensor
-    _register_write_xm(CTRL_REG5_XM, _register_read_xm(CTRL_REG5_XM) | 0x80, false);
 }
 
 void AP_InertialSensor_LSM9DS0::_set_gyro_scale(gyro_scale scale)
@@ -678,7 +676,7 @@ void AP_InertialSensor_LSM9DS0::_set_accel_scale(accel_scale scale)
     _accel_scale = (((float) scale + 1.0f) * 2.0f) / 32768.0f;
     if (scale == A_SCALE_16G) {
         /* the datasheet shows an exception for +-16G */
-        _accel_scale = 0.000732f;
+        _accel_scale = 0.000732;
     }
     /* convert to G/LSB to (m/s/s)/LSB */
     _accel_scale *= GRAVITY_MSS;
@@ -687,7 +685,7 @@ void AP_InertialSensor_LSM9DS0::_set_accel_scale(accel_scale scale)
 /**
  * Timer process to poll for new data from the LSM9DS0.
  */
-void AP_InertialSensor_LSM9DS0::_poll_data()
+bool AP_InertialSensor_LSM9DS0::_poll_data()
 {
     if (_gyro_data_ready()) {
         _read_data_transaction_g();
@@ -697,15 +695,14 @@ void AP_InertialSensor_LSM9DS0::_poll_data()
     }
 
     // check next register value for correctness
-    AP_HAL::Device::checkreg reg;
-    if (!_dev_gyro->check_next_register(reg)) {
-        log_register_change(_dev_gyro->get_bus_id(), reg);
+    if (!_dev_gyro->check_next_register()) {
         _inc_gyro_error_count(_gyro_instance);
     }
-    if (!_dev_accel->check_next_register(reg)) {
-        log_register_change(_dev_accel->get_bus_id(), reg);
+    if (!_dev_accel->check_next_register()) {
         _inc_accel_error_count(_accel_instance);
     }
+    
+    return true;
 }
 
 bool AP_InertialSensor_LSM9DS0::_accel_data_ready()
@@ -734,6 +731,7 @@ void AP_InertialSensor_LSM9DS0::_read_data_transaction_a()
     const uint8_t reg = OUT_X_L_A | 0xC0;
 
     if (!_dev_accel->transfer(&reg, 1, (uint8_t *) &raw_data, sizeof(raw_data))) {
+        hal.console->printf("LSM9DS0: error reading accelerometer\n");
         return;
     }
 
@@ -741,17 +739,7 @@ void AP_InertialSensor_LSM9DS0::_read_data_transaction_a()
     accel_data *= _accel_scale;
 
     _rotate_and_correct_accel(_accel_instance, accel_data);
-    _notify_new_accel_raw_sample(_accel_instance, accel_data, AP_HAL::micros64());
-
-    // read temperature every 10th sample
-    if (_temp_counter++ >= 10) {
-        int16_t traw;
-        const uint8_t regtemp = OUT_TEMP_L_XM | 0xC0;
-        _temp_counter = 0;
-        if (_dev_accel->transfer(&regtemp, 1, (uint8_t *)&traw, sizeof(traw))) {
-            _temperature = _temp_filter.apply(traw * 0.125 + 25);
-        }
-    }
+    _notify_new_accel_raw_sample(_accel_instance, accel_data);
 }
 
 /*
@@ -763,6 +751,7 @@ void AP_InertialSensor_LSM9DS0::_read_data_transaction_g()
     const uint8_t reg = OUT_X_L_G | 0xC0;
 
     if (!_dev_gyro->transfer(&reg, 1, (uint8_t *) &raw_data, sizeof(raw_data))) {
+        hal.console->printf("LSM9DS0: error reading gyroscope\n");
         return;
     }
 
@@ -771,14 +760,13 @@ void AP_InertialSensor_LSM9DS0::_read_data_transaction_g()
     gyro_data *= _gyro_scale;
 
     _rotate_and_correct_gyro(_gyro_instance, gyro_data);
-    _notify_new_gyro_raw_sample(_gyro_instance, gyro_data, AP_HAL::micros64());
+    _notify_new_gyro_raw_sample(_gyro_instance, gyro_data);
 }
 
 bool AP_InertialSensor_LSM9DS0::update()
 {
     update_gyro(_gyro_instance);
     update_accel(_accel_instance);
-    _publish_temperature(_accel_instance, _temperature);
 
     return true;
 }
@@ -787,28 +775,28 @@ bool AP_InertialSensor_LSM9DS0::update()
 /* dump all config registers - used for debug */
 void AP_InertialSensor_LSM9DS0::_dump_registers(void)
 {
-    hal.console->printf("LSM9DS0 registers:\n");
-    hal.console->printf("Gyroscope registers:\n");
+    hal.console->println("LSM9DS0 registers:");
+    hal.console->println("Gyroscope registers:");
     const uint8_t first = OUT_TEMP_L_XM;
     const uint8_t last = ACT_DUR;
     for (uint8_t reg=first; reg<=last; reg++) {
         uint8_t v = _register_read_g(reg);
         hal.console->printf("%02x:%02x ", (unsigned)reg, (unsigned)v);
         if ((reg - (first-1)) % 16 == 0) {
-            hal.console->printf("\n");
+            hal.console->println();
         }
     }
-    hal.console->printf("\n");
+    hal.console->println();
 
-    hal.console->printf("Accelerometer and Magnetometers registers:\n");
+    hal.console->println("Accelerometer and Magnetometers registers:");
     for (uint8_t reg=first; reg<=last; reg++) {
         uint8_t v = _register_read_xm(reg);
         hal.console->printf("%02x:%02x ", (unsigned)reg, (unsigned)v);
         if ((reg - (first-1)) % 16 == 0) {
-            hal.console->printf("\n");
+            hal.console->println();
         }
     }
-    hal.console->printf("\n");
+    hal.console->println();
 
 }
 #endif

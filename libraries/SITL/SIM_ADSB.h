@@ -18,10 +18,6 @@
 
 #pragma once
 
-#include "SIM_config.h"
-
-#if HAL_SIM_ADSB_ENABLED
-
 #include <AP_HAL/utility/Socket.h>
 
 #include "SIM_Aircraft.h"
@@ -42,41 +38,44 @@ private:
     char callsign[9];
     uint32_t ICAO_address;
     bool initialised = false;
-    ADSB_EMITTER_TYPE type;
-    uint64_t stationary_object_created_ms; // allows expiring of slow/stationary objects
 };
         
-    class ADSB : public SerialDevice {
+class ADSB {
 public:
-    ADSB() {};
-    void update(const class Aircraft &aircraft);
+    ADSB(const struct sitl_fdm &_fdm, const char *home_str);
+    void update(void);
 
 private:
-    uint8_t num_vehicles;
+    const struct sitl_fdm &fdm;
+    const char *target_address = "127.0.0.1";
+    const uint16_t target_port = 5762;
+
+    Location home;
+    uint8_t num_vehicles = 0;
     static const uint8_t num_vehicles_MAX = 200;
     ADSB_Vehicle vehicles[num_vehicles_MAX];
     
     // reporting period in ms
     const float reporting_period_ms = 1000;
-    uint32_t last_report_us;
-    uint32_t last_update_us;
-    uint32_t last_tx_report_ms;
+    uint32_t last_report_us = 0;
+    uint32_t last_update_us = 0;
+    uint32_t last_tx_report_ms = 0;
     
-    uint32_t last_heartbeat_ms;
+    uint32_t last_heartbeat_ms = 0;
     bool seen_heartbeat = false;
     uint8_t vehicle_system_id;
     uint8_t vehicle_component_id;
 
+    SocketAPM mav_socket { false };
     struct {
         // socket to telem2 on aircraft
+        bool connected;
         mavlink_message_t rxmsg;
         mavlink_status_t status;
         uint8_t seq;
     } mavlink {};
 
-    void send_report(const SITL::Aircraft&);
+    void send_report(void);
 };
 
 }  // namespace SITL
-
-#endif  // HAL_SIM_ADSB_ENABLED

@@ -23,8 +23,6 @@
  */
 #include "AP_RangeFinder_MaxsonarI2CXL.h"
 
-#if AP_RANGEFINDER_MAXSONARI2CXL_ENABLED
-
 #include <utility>
 
 #include <AP_HAL/AP_HAL.h>
@@ -32,11 +30,14 @@
 
 extern const AP_HAL::HAL& hal;
 
-AP_RangeFinder_MaxsonarI2CXL::AP_RangeFinder_MaxsonarI2CXL(RangeFinder::RangeFinder_State &_state,
-                                                           AP_RangeFinder_Params &_params,
-                                                           AP_HAL::OwnPtr<AP_HAL::I2CDevice> dev)
-    : AP_RangeFinder_Backend(_state, _params)
-    , _dev(std::move(dev))
+/*
+   The constructor also initializes the rangefinder. Note that this
+   constructor is not called until detect() returns true, so we
+   already know that we should setup the rangefinder
+*/
+AP_RangeFinder_MaxsonarI2CXL::AP_RangeFinder_MaxsonarI2CXL(RangeFinder &_ranger, uint8_t instance, RangeFinder::RangeFinder_State &_state)
+    : AP_RangeFinder_Backend(_ranger, instance, _state)
+    , _dev(hal.i2c_mgr->get_device(1, AP_RANGE_FINDER_MAXSONARI2CXL_DEFAULT_ADDR))
 {
 }
 
@@ -45,16 +46,11 @@ AP_RangeFinder_MaxsonarI2CXL::AP_RangeFinder_MaxsonarI2CXL(RangeFinder::RangeFin
    trying to take a reading on I2C. If we get a result the sensor is
    there.
 */
-AP_RangeFinder_Backend *AP_RangeFinder_MaxsonarI2CXL::detect(RangeFinder::RangeFinder_State &_state,
-																AP_RangeFinder_Params &_params,
-                                                             AP_HAL::OwnPtr<AP_HAL::I2CDevice> dev)
+AP_RangeFinder_Backend *AP_RangeFinder_MaxsonarI2CXL::detect(RangeFinder &_ranger, uint8_t instance,
+                                                             RangeFinder::RangeFinder_State &_state)
 {
-    if (!dev) {
-        return nullptr;
-    }
-
     AP_RangeFinder_MaxsonarI2CXL *sensor
-        = new AP_RangeFinder_MaxsonarI2CXL(_state, _params, std::move(dev));
+        = new AP_RangeFinder_MaxsonarI2CXL(_ranger, instance, _state);
     if (!sensor) {
         return nullptr;
     }
@@ -72,7 +68,10 @@ AP_RangeFinder_Backend *AP_RangeFinder_MaxsonarI2CXL::detect(RangeFinder::RangeF
  */
 bool AP_RangeFinder_MaxsonarI2CXL::_init(void)
 {
-    _dev->get_semaphore()->take_blocking();
+    if (!_dev->get_semaphore()->take(0)) {
+        return false;
+    }
+    
 
     if (!start_reading()) {
         _dev->get_semaphore()->give();
@@ -80,7 +79,7 @@ bool AP_RangeFinder_MaxsonarI2CXL::_init(void)
     }
 
     // give time for the sensor to process the request
-    hal.scheduler->delay(100);
+    hal.scheduler->delay(50);
 
     uint16_t reading_cm;
     if (!get_reading(reading_cm)) {
@@ -89,10 +88,10 @@ bool AP_RangeFinder_MaxsonarI2CXL::_init(void)
     }
 
     _dev->get_semaphore()->give();
-
-    _dev->register_periodic_callback(100000,
-                                     FUNCTOR_BIND_MEMBER(&AP_RangeFinder_MaxsonarI2CXL::_timer, void));
-
+    
+    _dev->register_periodic_callback(50000,
+                                     FUNCTOR_BIND_MEMBER(&AP_RangeFinder_MaxsonarI2CXL::_timer, bool));
+    
     return true;
 }
 
@@ -125,33 +124,35 @@ bool AP_RangeFinder_MaxsonarI2CXL::get_reading(uint16_t &reading_cm)
 }
 
 /*
-  timer called at 10Hz
+  timer called at 20Hz
 */
-void AP_RangeFinder_MaxsonarI2CXL::_timer(void)
+bool AP_RangeFinder_MaxsonarI2CXL::_timer(void)
 {
     uint16_t d;
     if (get_reading(d)) {
-        WITH_SEMAPHORE(_sem);
-        distance = d;
-        new_distance = true;
-        state.last_reading_ms = AP_HAL::millis();
+        if (_sem->take(0)) {
+            distance = d;
+            new_distance = true;
+            _sem->give();
+        }
     }
+    return true;
 }
+    
 
 /*
    update the state of the sensor
 */
 void AP_RangeFinder_MaxsonarI2CXL::update(void)
 {
-    WITH_SEMAPHORE(_sem);
-    if (new_distance) {
-        state.distance_m = distance * 0.01f;
-        new_distance = false;
-        update_status();
-    } else if (AP_HAL::millis() - state.last_reading_ms > 300) {
-        // if no updates for 0.3 seconds set no-data
-        set_status(RangeFinder::Status::NoData);
+    if (_sem->take_nonblocking()) {
+        if (new_distance) {
+            state.distance_cm = distance;
+            new_distance = false;
+            update_status();
+        } else {
+            set_status(RangeFinder::RangeFinder_NoData);
+        }
+         _sem->give();
     }
 }
-
-#endif  // AP_RANGEFINDER_MAXSONARI2CXL_ENABLED

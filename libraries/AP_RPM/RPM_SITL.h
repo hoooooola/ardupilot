@@ -14,10 +14,9 @@
  */
 #pragma once
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_SITL
+
 #include "AP_RPM.h"
-
-#if AP_RPM_SIM_ENABLED
-
 #include "RPM_Backend.h"
 #include <SITL/SITL.h>
 
@@ -28,10 +27,10 @@ public:
     AP_RPM_SITL(AP_RPM &ranger, uint8_t instance, AP_RPM::RPM_State &_state);
 
     // update state
-    void update(void) override;
+    void update(void);
 private:
-    SITL::SIM *sitl;
+    SITL::SITL *sitl;    
     uint8_t instance;
 };
 
-#endif // AP_RPM_SIM_ENABLED
+#endif // CONFIG_HAL_BOARD

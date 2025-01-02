@@ -20,13 +20,9 @@
 #include "AP_GPS.h"
 #include "AP_GPS_ERB.h"
 
-#if AP_GPS_ERB_ENABLED
-
 #define ERB_DEBUGGING 0
 
 #define STAT_FIX_VALID 0x01
-
-#include <AP_HAL/AP_HAL.h>
 
 extern const AP_HAL::HAL& hal;
 
@@ -35,6 +31,19 @@ extern const AP_HAL::HAL& hal;
 #else
  # define Debug(fmt, args ...)
 #endif
+
+AP_GPS_ERB::AP_GPS_ERB(AP_GPS &_gps, AP_GPS::GPS_State &_state, AP_HAL::UARTDriver *_port) :
+    AP_GPS_Backend(_gps, _state, _port),
+    _step(0),
+    _msg_id(0),
+    _payload_length(0),
+    _payload_counter(0),
+    _fix_count(0),
+    _new_position(0),
+    _new_speed(0),
+    next_fix(AP_GPS::NO_FIX)
+{
+}
 
 // Process bytes available from the stream
 //
@@ -57,9 +66,6 @@ AP_GPS_ERB::read(void)
 
         // read the next byte
         data = port->read();
-#if AP_GPS_DEBUG_LOGGING_ENABLED
-        log_data(&data, 1);
-#endif
 
         reset:
         switch(_step) {
@@ -73,7 +79,7 @@ AP_GPS_ERB::read(void)
             }
             _step = 0;
             Debug("reset %u", __LINE__);
-            FALLTHROUGH;
+            /* no break */
         case 0:
             if(PREAMBLE1 == data)
                 _step++;
@@ -148,11 +154,9 @@ AP_GPS_ERB::_parse_gps(void)
     case MSG_POS:
         Debug("Message POS");
         _last_pos_time        = _buffer.pos.time;
-        state.location.lng    = (int32_t)(_buffer.pos.longitude * (double)1e7);
-        state.location.lat    = (int32_t)(_buffer.pos.latitude * (double)1e7);
-        state.location.alt    = (int32_t)(_buffer.pos.altitude_msl * 100);
-        state.have_undulation = true;
-        state.undulation = _buffer.pos.altitude_msl - _buffer.pos.altitude_ellipsoid;
+        state.location.lng    = (int32_t)(_buffer.pos.longitude * 1e7);
+        state.location.lat    = (int32_t)(_buffer.pos.latitude * 1e7);
+        state.location.alt    = (int32_t)(_buffer.pos.altitude_msl * 1e2);
         state.status          = next_fix;
         _new_position = true;
         state.horizontal_accuracy = _buffer.pos.horizontal_accuracy * 1.0e-3f;
@@ -166,9 +170,9 @@ AP_GPS_ERB::_parse_gps(void)
               _buffer.stat.fix_type);
         if (_buffer.stat.fix_status & STAT_FIX_VALID) {
             if (_buffer.stat.fix_type == AP_GPS_ERB::FIX_FIX) {
-                next_fix = AP_GPS::GPS_OK_FIX_3D_RTK_FIXED;
+                next_fix = AP_GPS::GPS_OK_FIX_3D_RTK;
             } else if (_buffer.stat.fix_type == AP_GPS_ERB::FIX_FLOAT) {
-                next_fix = AP_GPS::GPS_OK_FIX_3D_RTK_FLOAT;
+                next_fix = AP_GPS::GPS_OK_FIX_3D_DGPS;
             } else if (_buffer.stat.fix_type == AP_GPS_ERB::FIX_SINGLE) {
                 next_fix = AP_GPS::GPS_OK_FIX_3D;
             } else {
@@ -181,8 +185,6 @@ AP_GPS_ERB::_parse_gps(void)
         }
         state.num_sats = _buffer.stat.satellites;
         if (next_fix >= AP_GPS::GPS_OK_FIX_3D) {
-            // use the uart receive time to make packet timestamps more accurate
-            set_uart_timestamp(_payload_length + sizeof(erb_header) + 2);
             state.last_gps_time_ms = AP_HAL::millis();
             state.time_week_ms    = _buffer.stat.time;
             state.time_week       = _buffer.stat.week;
@@ -207,23 +209,6 @@ AP_GPS_ERB::_parse_gps(void)
         state.speed_accuracy = _buffer.vel.speed_accuracy * 0.01f;
         _new_speed = true;
         break;
-    case MSG_RTK:
-        Debug("Message RTK");
-        state.rtk_baseline_coords_type = RTK_BASELINE_COORDINATE_SYSTEM_NED;
-        state.rtk_num_sats      = _buffer.rtk.base_num_sats;
-        if (_buffer.rtk.age_cs == 0xFFFF) {
-            state.rtk_age_ms    = 0xFFFFFFFF;
-        } else {
-            state.rtk_age_ms    = _buffer.rtk.age_cs * 10;
-        }
-        state.rtk_baseline_x_mm = _buffer.rtk.baseline_N_mm;
-        state.rtk_baseline_y_mm = _buffer.rtk.baseline_E_mm;
-        state.rtk_baseline_z_mm = _buffer.rtk.baseline_D_mm;
-        state.rtk_accuracy      = _buffer.rtk.ar_ratio;
-
-        state.rtk_week_number   = _buffer.rtk.base_week_number;
-        state.rtk_time_week_ms  = _buffer.rtk.base_time_week_ms;
-        break;
     default:
         Debug("Unexpected message 0x%02x", (unsigned)_msg_id);
         return false;
@@ -236,6 +221,17 @@ AP_GPS_ERB::_parse_gps(void)
         return true;
     }
     return false;
+}
+
+void
+AP_GPS_ERB::inject_data(const uint8_t *data, uint16_t len)
+{
+
+    if (port->txspace() > len) {
+        port->write(data, len);
+    } else {
+        Debug("ERB: Not enough TXSPACE");
+    }
 }
 
 /*
@@ -253,7 +249,7 @@ reset:
                 break;
             }
             state.step = 0;
-            FALLTHROUGH;
+            /* no break */
         case 0:
             if (PREAMBLE1 == data)
                 state.step++;
@@ -294,4 +290,3 @@ reset:
     }
     return false;
 }
-#endif

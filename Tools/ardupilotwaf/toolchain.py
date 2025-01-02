@@ -16,12 +16,9 @@ from waflib import Errors, Context, Utils
 from waflib.Configure import conf
 from waflib.Tools import compiler_c, compiler_cxx
 from waflib.Tools import clang, clangxx, gcc, gxx
-from waflib.Tools import c_config
-from waflib import Logs
 
 import os
 import re
-import sys
 
 @conf
 def find_gxx(conf):
@@ -114,44 +111,32 @@ def _filter_supported_cxx_compilers(*compilers):
         l = compiler_cxx.cxx_compiler[k]
         compiler_cxx.cxx_compiler[k] = [c for c in compilers if c in l]
 
-def _set_pkgconfig_crosscompilation_wrapper(cfg):
-    original_validatecfg = cfg.validate_cfg
+@conf
+def find_toolchain_program(cfg, filename, **kw):
+    filename = Utils.to_list(filename)
 
-    @conf
-    def new_validate_cfg(kw):
-        if not 'path' in kw:
-            if not cfg.env.PKGCONFIG:
-                cfg.find_program('%s-pkg-config' % cfg.env.TOOLCHAIN, var='PKGCONFIG')
-            kw['path'] = cfg.env.PKGCONFIG
+    if not kw.get('var', ''):
+        # just copy from the original implementation
+        kw['var'] = re.sub(r'[-.]', '_', filename[0].upper())
 
-        original_validatecfg(kw)
+    if cfg.env.TOOLCHAIN != 'native':
+        for i, name in enumerate(filename):
+            filename[i] = '%s-%s' % (cfg.env.TOOLCHAIN, name)
 
-    cfg.validate_cfg = new_validate_cfg
+    return cfg.find_program(filename, **kw)
 
 def configure(cfg):
+    if cfg.env.TOOLCHAIN == 'native':
+        cfg.load('compiler_cxx compiler_c')
+        return
+
     _filter_supported_c_compilers('gcc', 'clang')
     _filter_supported_cxx_compilers('g++', 'clang++')
 
+    cfg.find_toolchain_program('ar')
+
     cfg.msg('Using toolchain', cfg.env.TOOLCHAIN)
-
-    if cfg.env.TOOLCHAIN == 'native':
-        cfg.load('compiler_cxx compiler_c')
-
-        if not cfg.options.disable_gccdeps:
-            cfg.load('gccdeps')
-
-        return
-
-    _set_pkgconfig_crosscompilation_wrapper(cfg)
-    if sys.platform.startswith("cygwin"):
-        # on cygwin arm-none-eabi-ar doesn't support the @FILE syntax for splitting long lines
-        cfg.find_program('ar', var='AR', quiet=True)
-    else:
-        cfg.find_program('%s-ar' % cfg.env.TOOLCHAIN, var='AR', quiet=True)
     cfg.load('compiler_cxx compiler_c')
-
-    if not cfg.options.disable_gccdeps:
-        cfg.load('gccdeps')
 
     if cfg.env.COMPILER_CC == 'clang':
         cfg.env.CFLAGS += cfg.env.CLANG_FLAGS

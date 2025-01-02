@@ -1,40 +1,41 @@
 #pragma once
 
 #include "AP_HAL_SITL.h"
-#if CONFIG_HAL_BOARD == HAL_BOARD_SITL
 
 class HALSITL::GPIO : public AP_HAL::GPIO {
 public:
-    explicit GPIO(SITL_State *sitlState): _sitlState(sitlState) {}
-    void init() override;
-    void pinMode(uint8_t pin, uint8_t output) override;
-    uint8_t read(uint8_t pin) override;
-    void write(uint8_t pin, uint8_t value) override;
-    void toggle(uint8_t pin) override;
+    GPIO(SITL_State *_sitlState) {
+        sitlState = _sitlState;
+    }
+    void    init();
+    void    pinMode(uint8_t pin, uint8_t output);
+    int8_t  analogPinToDigitalPin(uint8_t pin);
+    uint8_t read(uint8_t pin);
+    void    write(uint8_t pin, uint8_t value);
+    void    toggle(uint8_t pin);
 
     /* Alternative interface: */
-    AP_HAL::DigitalSource* channel(uint16_t n) override;
+    AP_HAL::DigitalSource* channel(uint16_t n);
+
+    /* Interrupt interface: */
+    bool    attach_interrupt(uint8_t interrupt_num, AP_HAL::Proc p,
+            uint8_t mode);
 
     /* return true if USB cable is connected */
-    bool usb_connected(void) override;
+    bool    usb_connected(void);
 
-    bool valid_pin(uint8_t pin) const override { return pin < 16; }
-    
 private:
-    SITL_State *_sitlState;
-
-    uint8_t pin_mode_is_write;
+    SITL_State *sitlState;
 };
 
 class HALSITL::DigitalSource : public AP_HAL::DigitalSource {
 public:
-    explicit DigitalSource(uint8_t pin);
-    void mode(uint8_t output) override;
-    uint8_t read() override;
-    void write(uint8_t value) override;
-    void toggle() override;
+    DigitalSource(uint8_t _pin);
+    void    mode(uint8_t output);
+    uint8_t read();
+    void    write(uint8_t value); 
+    void    toggle();
 
 private:
-    uint8_t _pin;
+    uint8_t pin;
 };
-#endif

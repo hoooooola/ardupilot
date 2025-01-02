@@ -38,7 +38,7 @@ def run_replay(logfile):
 
 def get_log_list():
     '''get a list of log files to process'''
-    import glob, sys
+    import glob, os, sys
     pattern = os.path.join(opts.logdir, "*-checked.bin")
     file_list = glob.glob(pattern)
     print("Found %u logs to processs" % len(file_list))
@@ -148,6 +148,7 @@ def check_logs():
         os.unlink("replay_results.txt")
     except Exception as ex:
         print(ex)
+        pass
 
     for logfile in log_list:
         run_replay(logfile)
@@ -156,7 +157,7 @@ def check_logs():
 
 def create_checked_logs():
     '''create a set of CHEK logs'''
-    import glob, sys
+    import glob, os, sys
     if os.path.isfile(opts.logdir):
         full_file_list = [opts.logdir]
     else:

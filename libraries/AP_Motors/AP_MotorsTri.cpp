@@ -13,24 +13,78 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+/*
+ *       AP_MotorsTri.cpp - ArduCopter motors library
+ *       Code by RandyMackay. DIYDrones.com
+ *
+ */
 #include <AP_HAL/AP_HAL.h>
-#include <AP_Vehicle/AP_Vehicle_Type.h>
-
 #include <AP_Math/AP_Math.h>
-#include <GCS_MAVLink/GCS.h>
-#include <SRV_Channel/SRV_Channel.h>
-
 #include "AP_MotorsTri.h"
 
 extern const AP_HAL::HAL& hal;
 
+const AP_Param::GroupInfo AP_MotorsTri::var_info[] = {
+    // variables from parent vehicle
+    AP_NESTEDGROUPINFO(AP_MotorsMulticopter, 0),
+
+    // parameters 1 ~ 29 were reserved for tradheli
+    // parameters 30 ~ 39 reserved for tricopter
+    // parameters 40 ~ 49 for single copter and coax copter (these have identical parameter files)
+
+    // @Param: YAW_SV_REV
+    // @DisplayName: Yaw Servo Reverse
+    // @Description: Yaw servo reversing. Set to 1 for normal (forward) operation. Set to -1 to reverse this channel.
+    // @Values: -1:Reversed,1:Normal
+    // @User: Standard
+    AP_GROUPINFO("YAW_SV_REV", 31,     AP_MotorsTri,  _yaw_reverse, 1),
+
+    // @Param: YAW_SV_TRIM
+    // @DisplayName: Yaw Servo Trim/Center
+    // @Description: Trim or center position of yaw servo
+    // @Range: 1250 1750
+    // @Units: PWM
+    // @Increment: 1
+    // @User: Standard
+    AP_GROUPINFO("YAW_SV_TRIM", 32,     AP_MotorsTri,  _yaw_servo_trim, 1500),
+
+    // @Param: YAW_SV_MIN
+    // @DisplayName: Yaw Servo Min PWM
+    // @Description: Yaw servo's minimum pwm value
+    // @Range: 1000 1400
+    // @Units: PWM
+    // @Increment: 1
+    // @User: Standard
+    AP_GROUPINFO("YAW_SV_MIN", 33,     AP_MotorsTri,  _yaw_servo_min, 1250),
+
+    // @Param: YAW_SV_MAX
+    // @DisplayName: Yaw Servo Max PWM
+    // @Description: Yaw servo's maximum pwm value
+    // @Range: 1600 2000
+    // @Units: PWM
+    // @Increment: 1
+    // @User: Standard
+    AP_GROUPINFO("YAW_SV_MAX", 34,     AP_MotorsTri,  _yaw_servo_max, 1750),
+
+    // @Param: YAW_SV_ANGLE
+    // @DisplayName: Yaw Servo Max Lean Angle
+    // @Description: Yaw servo's maximum lean angle
+    // @Range: 5 80
+    // @Units: Degrees
+    // @Increment: 1
+    // @User: Standard
+    AP_GROUPINFO("YAW_SV_ANGLE", 35,   AP_MotorsTri,  _yaw_servo_angle_max_deg, 30),
+
+    AP_GROUPEND
+};
+
 // init
-void AP_MotorsTri::init(motor_frame_class frame_class, motor_frame_type frame_type)
+void AP_MotorsTri::Init()
 {
     add_motor_num(AP_MOTORS_MOT_1);
     add_motor_num(AP_MOTORS_MOT_2);
     add_motor_num(AP_MOTORS_MOT_4);
-
+    
     // set update rate for the 3 motors (but not the servo on channel 7)
     set_update_rate(_speed_hz);
 
@@ -41,38 +95,10 @@ void AP_MotorsTri::init(motor_frame_class frame_class, motor_frame_type frame_ty
 
     // allow mapping of motor7
     add_motor_num(AP_MOTORS_CH_TRI_YAW);
-
-    // Check for tail servo
-    _have_tail_servo = SRV_Channels::function_assigned(SRV_Channel::k_motor7);
-
-    SRV_Channels::set_angle(SRV_Channels::get_motor_function(AP_MOTORS_CH_TRI_YAW), _yaw_servo_angle_max_deg*100);
-
-    // check for reverse tricopter
-    if (frame_type == MOTOR_FRAME_TYPE_PLUSREV) {
-        _pitch_reversed = true;
-    }
-
-    _mav_type = MAV_TYPE_TRICOPTER;
-
-    // record successful initialisation if what we setup was the desired frame_class
-    set_initialised_ok(frame_class == MOTOR_FRAME_TRI);
-}
-
-// set frame class (i.e. quad, hexa, heli) and type (i.e. x, plus)
-void AP_MotorsTri::set_frame_class_and_type(motor_frame_class frame_class, motor_frame_type frame_type)
-{
-    // check for reverse tricopter
-    if (frame_type == MOTOR_FRAME_TYPE_PLUSREV) {
-        _pitch_reversed = true;
-    } else {
-        _pitch_reversed = false;
-    }
-
-    set_initialised_ok((frame_class == MOTOR_FRAME_TRI) && SRV_Channels::function_assigned(SRV_Channel::k_motor7));
 }
 
 // set update rate to motors - a value in hertz
-void AP_MotorsTri::set_update_rate(uint16_t speed_hz)
+void AP_MotorsTri::set_update_rate( uint16_t speed_hz )
 {
     // record requested speed
     _speed_hz = speed_hz;
@@ -85,55 +111,60 @@ void AP_MotorsTri::set_update_rate(uint16_t speed_hz)
     rc_set_freq(mask, _speed_hz);
 }
 
+// enable - starts allowing signals to be sent to motors
+void AP_MotorsTri::enable()
+{
+    // enable output channels
+    rc_enable_ch(AP_MOTORS_MOT_1);
+    rc_enable_ch(AP_MOTORS_MOT_2);
+    rc_enable_ch(AP_MOTORS_MOT_4);
+    rc_enable_ch(AP_MOTORS_CH_TRI_YAW);
+}
+
 void AP_MotorsTri::output_to_motors()
 {
-    switch (_spool_state) {
-        case SpoolState::SHUT_DOWN:
+    switch (_spool_mode) {
+        case SHUT_DOWN:
             // sends minimum values out to the motors
-            rc_write(AP_MOTORS_MOT_1, output_to_pwm(0));
-            rc_write(AP_MOTORS_MOT_2, output_to_pwm(0));
-            rc_write(AP_MOTORS_MOT_4, output_to_pwm(0));
-            rc_write_angle(AP_MOTORS_CH_TRI_YAW, 0);
+            hal.rcout->cork();
+            rc_write(AP_MOTORS_MOT_1, get_pwm_output_min());
+            rc_write(AP_MOTORS_MOT_2, get_pwm_output_min());
+            rc_write(AP_MOTORS_MOT_4, get_pwm_output_min());
+            rc_write(AP_MOTORS_CH_TRI_YAW, _yaw_servo_trim);
+            hal.rcout->push();
             break;
-        case SpoolState::GROUND_IDLE:
+        case SPIN_WHEN_ARMED:
             // sends output to motors when armed but not flying
-            set_actuator_with_slew(_actuator[1], actuator_spin_up_to_ground_idle());
-            set_actuator_with_slew(_actuator[2], actuator_spin_up_to_ground_idle());
-            set_actuator_with_slew(_actuator[4], actuator_spin_up_to_ground_idle());
-            rc_write(AP_MOTORS_MOT_1, output_to_pwm(_actuator[1]));
-            rc_write(AP_MOTORS_MOT_2, output_to_pwm(_actuator[2]));
-            rc_write(AP_MOTORS_MOT_4, output_to_pwm(_actuator[4]));
-            rc_write_angle(AP_MOTORS_CH_TRI_YAW, 0);
+            hal.rcout->cork();
+            rc_write(AP_MOTORS_MOT_1, calc_spin_up_to_pwm());
+            rc_write(AP_MOTORS_MOT_2, calc_spin_up_to_pwm());
+            rc_write(AP_MOTORS_MOT_4, calc_spin_up_to_pwm());
+            rc_write(AP_MOTORS_CH_TRI_YAW, _yaw_servo_trim);
+            hal.rcout->push();
             break;
-        case SpoolState::SPOOLING_UP:
-        case SpoolState::THROTTLE_UNLIMITED:
-        case SpoolState::SPOOLING_DOWN:
+        case SPOOL_UP:
+        case THROTTLE_UNLIMITED:
+        case SPOOL_DOWN:
             // set motor output based on thrust requests
-            set_actuator_with_slew(_actuator[1], thr_lin.thrust_to_actuator(_thrust_right));
-            set_actuator_with_slew(_actuator[2], thr_lin.thrust_to_actuator(_thrust_left));
-            set_actuator_with_slew(_actuator[4], thr_lin.thrust_to_actuator(_thrust_rear));
-            rc_write(AP_MOTORS_MOT_1, output_to_pwm(_actuator[1]));
-            rc_write(AP_MOTORS_MOT_2, output_to_pwm(_actuator[2]));
-            rc_write(AP_MOTORS_MOT_4, output_to_pwm(_actuator[4]));
-            rc_write_angle(AP_MOTORS_CH_TRI_YAW, degrees(_pivot_angle)*100);
+            hal.rcout->cork();
+            rc_write(AP_MOTORS_MOT_1, calc_thrust_to_pwm(_thrust_right));
+            rc_write(AP_MOTORS_MOT_2, calc_thrust_to_pwm(_thrust_left));
+            rc_write(AP_MOTORS_MOT_4, calc_thrust_to_pwm(_thrust_rear));
+            rc_write(AP_MOTORS_CH_TRI_YAW, calc_yaw_radio_output(_pivot_angle, radians(_yaw_servo_angle_max_deg)));
+            hal.rcout->push();
             break;
     }
 }
 
 // get_motor_mask - returns a bitmask of which outputs are being used for motors or servos (1 means being used)
 //  this can be used to ensure other pwm outputs (i.e. for servos) do not conflict
-uint32_t AP_MotorsTri::get_motor_mask()
+uint16_t AP_MotorsTri::get_motor_mask()
 {
     // tri copter uses channels 1,2,4 and 7
-    uint32_t motor_mask = (1U << AP_MOTORS_MOT_1) |
-                          (1U << AP_MOTORS_MOT_2) |
-                          (1U << AP_MOTORS_MOT_4);
-    uint32_t mask = motor_mask_to_srv_channel_mask(motor_mask);
-
-    // add parent's mask
-    mask |= AP_MotorsMulticopter::get_motor_mask();
-
-    return mask;
+    return rc_map_mask((1U << AP_MOTORS_MOT_1) |
+                       (1U << AP_MOTORS_MOT_2) |
+                       (1U << AP_MOTORS_MOT_4) |
+                       (1U << AP_MOTORS_CH_TRI_YAW));
 }
 
 // output_armed - sends commands to the motors
@@ -144,41 +175,26 @@ void AP_MotorsTri::output_armed_stabilizing()
     float   pitch_thrust;               // pitch thrust input value, +/- 1.0
     float   yaw_thrust;                 // yaw thrust input value, +/- 1.0
     float   throttle_thrust;            // throttle thrust input value, 0.0 - 1.0
-    float   throttle_avg_max;           // throttle thrust average maximum value, 0.0 - 1.0
     float   throttle_thrust_best_rpy;   // throttle providing maximum roll, pitch and yaw range without climbing
     float   rpy_scale = 1.0f;           // this is used to scale the roll, pitch and yaw to fit within the motor limits
     float   rpy_low = 0.0f;             // lowest motor value
     float   rpy_high = 0.0f;            // highest motor value
     float   thr_adj;                    // the difference between the pilot's desired throttle and throttle_thrust_best_rpy
 
-    SRV_Channels::set_angle(SRV_Channels::get_motor_function(AP_MOTORS_CH_TRI_YAW), _yaw_servo_angle_max_deg*100);
-
     // sanity check YAW_SV_ANGLE parameter value to avoid divide by zero
-    _yaw_servo_angle_max_deg.set(constrain_float(_yaw_servo_angle_max_deg, AP_MOTORS_TRI_SERVO_RANGE_DEG_MIN, AP_MOTORS_TRI_SERVO_RANGE_DEG_MAX));
+    _yaw_servo_angle_max_deg = constrain_float(_yaw_servo_angle_max_deg, AP_MOTORS_TRI_SERVO_RANGE_DEG_MIN, AP_MOTORS_TRI_SERVO_RANGE_DEG_MAX);
 
     // apply voltage and air pressure compensation
-    const float compensation_gain = thr_lin.get_compensation_gain();
-    roll_thrust = (_roll_in + _roll_in_ff) * compensation_gain;
-    pitch_thrust = (_pitch_in + _pitch_in_ff) * compensation_gain;
-    yaw_thrust = (_yaw_in + _yaw_in_ff) * compensation_gain * sinf(radians(_yaw_servo_angle_max_deg)); // we scale this so a thrust request of 1.0f will ask for full servo deflection at full rear throttle
-    throttle_thrust = get_throttle() * compensation_gain;
-    throttle_avg_max = _throttle_avg_max * compensation_gain;
+    roll_thrust = _roll_in * get_compensation_gain();
+    pitch_thrust = _pitch_in * get_compensation_gain();
+    yaw_thrust = _yaw_in * get_compensation_gain()*sinf(radians(_yaw_servo_angle_max_deg)); // we scale this so a thrust request of 1.0f will ask for full servo deflection at full rear throttle
+    throttle_thrust = get_throttle() * get_compensation_gain();
 
-    // check for reversed pitch
-    if (_pitch_reversed) {
-        pitch_thrust *= -1.0f;
-    }
-
-    // VTOL plane may not have tail servo
-    if (!_have_tail_servo) {
-        _pivot_angle = 0.0;
-    } else {
-        // calculate angle of yaw pivot
-        _pivot_angle = safe_asin(yaw_thrust);
-        if (fabsf(_pivot_angle) > radians(_yaw_servo_angle_max_deg)) {
-            limit.yaw = true;
-            _pivot_angle = constrain_float(_pivot_angle, -radians(_yaw_servo_angle_max_deg), radians(_yaw_servo_angle_max_deg));
-        }
+    // calculate angle of yaw pivot
+    _pivot_angle = safe_asin(yaw_thrust);
+    if (fabsf(_pivot_angle) > radians(_yaw_servo_angle_max_deg)) {
+        limit.yaw = true;
+        _pivot_angle = constrain_float(_pivot_angle, -radians(_yaw_servo_angle_max_deg), radians(_yaw_servo_angle_max_deg));
     }
 
     float pivot_thrust_max = cosf(_pivot_angle);
@@ -194,7 +210,7 @@ void AP_MotorsTri::output_armed_stabilizing()
         limit.throttle_upper = true;
     }
 
-    throttle_avg_max = constrain_float(throttle_avg_max, throttle_thrust, _throttle_thrust_max);
+    _throttle_avg_max = constrain_float(_throttle_avg_max, throttle_thrust, _throttle_thrust_max);
 
     // The following mix may be offer less coupling between axis but needs testing
     //_thrust_right = roll_thrust * -0.5f + pitch_thrust * 1.0f;
@@ -209,13 +225,13 @@ void AP_MotorsTri::output_armed_stabilizing()
     // set rpy_low and rpy_high to the lowest and highest values of the motors
 
     // record lowest roll pitch command
-    rpy_low = MIN(_thrust_right, _thrust_left);
-    rpy_high = MAX(_thrust_right, _thrust_left);
-    if (rpy_low > _thrust_rear) {
+    rpy_low = MIN(_thrust_right,_thrust_left);
+    rpy_high = MAX(_thrust_right,_thrust_left);
+    if (rpy_low > _thrust_rear){
         rpy_low = _thrust_rear;
     }
     // check to see if the rear motor will reach maximum thrust before the front two motors
-    if ((1.0f - rpy_high) > (pivot_thrust_max - _thrust_rear)) {
+    if ((1.0f - rpy_high) > (pivot_thrust_max - _thrust_rear)){
         thrust_max = pivot_thrust_max;
         rpy_high = _thrust_rear;
     }
@@ -231,47 +247,41 @@ void AP_MotorsTri::output_armed_stabilizing()
     //      We will choose #2 (a mix of pilot and hover throttle) only when the throttle is quite low.  We favor reducing throttle instead of better yaw control because the pilot has commanded it
 
     // check everything fits
-    throttle_thrust_best_rpy = MIN(0.5f * thrust_max - (rpy_low + rpy_high) / 2.0, throttle_avg_max);
-    if (is_zero(rpy_low)) {
+    throttle_thrust_best_rpy = MIN(0.5f*thrust_max - (rpy_low+rpy_high)/2.0, _throttle_avg_max);
+    if(is_zero(rpy_low)){
         rpy_scale = 1.0f;
     } else {
-        rpy_scale = constrain_float(-throttle_thrust_best_rpy / rpy_low, 0.0f, 1.0f);
+        rpy_scale = constrain_float(-throttle_thrust_best_rpy/rpy_low, 0.0f, 1.0f);
     }
 
     // calculate how close the motors can come to the desired throttle
     thr_adj = throttle_thrust - throttle_thrust_best_rpy;
-    if (rpy_scale < 1.0f) {
+    if(rpy_scale < 1.0f){
         // Full range is being used by roll, pitch, and yaw.
-        limit.roll = true;
-        limit.pitch = true;
-        if (thr_adj > 0.0f) {
+        limit.roll_pitch = true;
+        if (thr_adj > 0.0f){
             limit.throttle_upper = true;
         }
         thr_adj = 0.0f;
-    } else {
-        if (thr_adj < -(throttle_thrust_best_rpy + rpy_low)) {
+    }else{
+        if(thr_adj < -(throttle_thrust_best_rpy+rpy_low)){
             // Throttle can't be reduced to desired value
-            thr_adj = -(throttle_thrust_best_rpy + rpy_low);
-        } else if (thr_adj > thrust_max - (throttle_thrust_best_rpy + rpy_high)) {
+            thr_adj = -(throttle_thrust_best_rpy+rpy_low);
+        }else if(thr_adj > thrust_max - (throttle_thrust_best_rpy+rpy_high)){
             // Throttle can't be increased to desired value
-            thr_adj = thrust_max - (throttle_thrust_best_rpy + rpy_high);
+            thr_adj = thrust_max - (throttle_thrust_best_rpy+rpy_high);
             limit.throttle_upper = true;
         }
     }
 
-    // determine throttle thrust for harmonic notch
-    const float throttle_thrust_best_plus_adj = throttle_thrust_best_rpy + thr_adj;
-    // compensation_gain can never be zero
-    _throttle_out = throttle_thrust_best_plus_adj / compensation_gain;
-
     // add scaled roll, pitch, constrained yaw and throttle for each motor
-    _thrust_right = throttle_thrust_best_plus_adj + rpy_scale * _thrust_right;
-    _thrust_left = throttle_thrust_best_plus_adj + rpy_scale * _thrust_left;
-    _thrust_rear = throttle_thrust_best_plus_adj + rpy_scale * _thrust_rear;
+    _thrust_right = throttle_thrust_best_rpy+thr_adj + rpy_scale*_thrust_right;
+    _thrust_left = throttle_thrust_best_rpy+thr_adj + rpy_scale*_thrust_left;
+    _thrust_rear = throttle_thrust_best_rpy+thr_adj + rpy_scale*_thrust_rear;
 
     // scale pivot thrust to account for pivot angle
     // we should not need to check for divide by zero as _pivot_angle is constrained to the 5deg ~ 80 deg range
-    _thrust_rear = _thrust_rear / cosf(_pivot_angle);
+    _thrust_rear = _thrust_rear/cosf(_pivot_angle);
 
     // constrain all outputs to 0.0f to 1.0f
     // test code should be run with these lines commented out as they should not do anything
@@ -280,11 +290,16 @@ void AP_MotorsTri::output_armed_stabilizing()
     _thrust_rear = constrain_float(_thrust_rear, 0.0f, 1.0f);
 }
 
-// output_test_seq - spin a motor at the pwm value specified
+// output_test - spin a motor at the pwm value specified
 //  motor_seq is the motor's sequence number from 1 to the number of motors on the frame
 //  pwm value is an actual pwm value that will be output, normally in the range of 1000 ~ 2000
-void AP_MotorsTri::_output_test_seq(uint8_t motor_seq, int16_t pwm)
+void AP_MotorsTri::output_test(uint8_t motor_seq, int16_t pwm)
 {
+    // exit immediately if not armed
+    if (!armed()) {
+        return;
+    }
+
     // output to motors and servos
     switch (motor_seq) {
         case 1:
@@ -309,6 +324,24 @@ void AP_MotorsTri::_output_test_seq(uint8_t motor_seq, int16_t pwm)
     }
 }
 
+// calc_yaw_radio_output - calculate final radio output for yaw channel
+int16_t AP_MotorsTri::calc_yaw_radio_output(float yaw_input, float yaw_input_max)
+{
+    int16_t ret;
+
+    if (_yaw_reverse < 0) {
+        yaw_input = -yaw_input;
+    }
+
+    if (yaw_input >= 0){
+        ret = (_yaw_servo_trim + (yaw_input/yaw_input_max * (_yaw_servo_max - _yaw_servo_trim)));
+    } else {
+        ret = (_yaw_servo_trim + (yaw_input/yaw_input_max * (_yaw_servo_trim - _yaw_servo_min)));
+    }
+
+    return ret;
+}
+
 /*
   call vehicle supplied thrust compensation if set. This allows for
   vehicle specific thrust compensation for motor arrangements such as
@@ -325,52 +358,7 @@ void AP_MotorsTri::thrust_compensation(void)
 
         // extract compensated thrust values
         _thrust_right = thrust[0];
-        _thrust_left = thrust[1];
-        _thrust_rear = thrust[3];
+        _thrust_left  = thrust[1];
+        _thrust_rear  = thrust[3];
     }
-}
-
-/*
-  override tricopter tail servo output in output_motor_mask
- */
-void AP_MotorsTri::output_motor_mask(float thrust, uint16_t mask, float rudder_dt)
-{
-    // normal multicopter output
-    AP_MotorsMulticopter::output_motor_mask(thrust, mask, rudder_dt);
-
-    // and override yaw servo
-    rc_write_angle(AP_MOTORS_CH_TRI_YAW, 0);
-}
-
-float AP_MotorsTri::get_roll_factor(uint8_t i)
-{
-    float ret = 0.0f;
-
-    switch (i) {
-        // right motor
-        case AP_MOTORS_MOT_1:
-            ret = -1.0f;
-            break;
-            // left motor
-        case AP_MOTORS_MOT_2:
-            ret = 1.0f;
-            break;
-    }
-
-    return ret;
-}
-
-// Run arming checks
-bool AP_MotorsTri::arming_checks(size_t buflen, char *buffer) const
-{
-#if !APM_BUILD_TYPE(APM_BUILD_ArduPlane) // Tilt Rotors do not need a yaw servo
-    // Check for yaw servo
-    if (!_have_tail_servo) {
-        hal.util->snprintf(buffer, buflen, "no SERVOx_FUNCTION set to Motor7 for tail servo");
-        return false;
-    }
-#endif
-
-    // run base class checks
-    return AP_MotorsMulticopter::arming_checks(buflen, buffer);
 }

@@ -22,8 +22,8 @@
 
 namespace SITL {
 
-Balloon::Balloon(const char *frame_str) :
-    Aircraft(frame_str)
+Balloon::Balloon(const char *home_str, const char *frame_str) :
+    Aircraft(home_str, frame_str)
 {
     mass = 5.0f;
 }
@@ -70,7 +70,6 @@ void Balloon::update(const struct sitl_input &input)
     
     // update lat/lon/altitude
     update_position();
-    time_advance();
 
     // update magnetic field
     update_mag_field_bf();

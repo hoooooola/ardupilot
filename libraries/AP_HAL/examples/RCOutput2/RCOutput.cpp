@@ -1,24 +1,10 @@
 /*
   Simple test of RC output interface with Menu
-  Attention: If your board has safety switch,
-  don't forget to push it to enable the PWM output.
 */
 
 #include <AP_Common/AP_Common.h>
 #include <AP_HAL/AP_HAL.h>
 #include <AP_Menu/AP_Menu.h>
-
-// we need a boardconfig created so that the io processor's enable
-// parameter is available
-#if CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS
-#include <AP_BoardConfig/AP_BoardConfig.h>
-#include <AP_IOMCU/AP_IOMCU.h>
-AP_BoardConfig BoardConfig;
-#endif
-
-void setup();
-void loop();
-void drive(uint16_t hz_speed);
 
 #define MENU_FUNC(func) FUNCTOR_BIND(&commands, &Menu_Commands::func, int8_t, uint8_t, const Menu::arg *)
 
@@ -86,11 +72,8 @@ const struct Menu::command rcoutput_menu_commands[] = {
 MENU(menu, "Menu: ", rcoutput_menu_commands);
 
 void setup(void) {
-    hal.console->printf("Starting AP_HAL::RCOutput test\n");
+    hal.console->println("Starting AP_HAL::RCOutput test");
 
-#if CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS
-    BoardConfig.init();
-#endif
     for (uint8_t i = 0; i < 14; i++) {
         hal.rcout->enable_ch(i);
     }

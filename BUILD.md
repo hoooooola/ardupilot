@@ -1,54 +1,38 @@
 # Building ArduPilot #
 
-## Get the Source
-
-Clone the project from GitHub:
-```sh
-git clone --recursive https://github.com/ArduPilot/ardupilot.git
-cd ardupilot
-```
-
-You can also read more about the build system in the
+Ardupilot is gradually moving from the make-based build system to
+[Waf](https://waf.io/). The instructions below should be enough for you to
+build Ardupilot, but you can also read more about the build system in the
 [Waf Book](https://waf.io/book/).
 
-waf should always be called from the locally cloned ardupilot root directory for the local branch you are trying to build from.
-
-**Note**
-Do not run `waf` with `sudo`!  This leads to permission and environment problems.
+Waf should always be called from the ardupilot's root directory. Differently
+from the make-based build, with Waf there's a configure step to choose the
+board to be used (default is `sitl`).
 
 ## Basic usage ##
 
-There are several commands in the build system for advanced usage, but here we
+There are several commands in the build system for advanced usages, but here we
 list some basic and more used commands as example.
 
 * **Build ArduCopter**
 
-    Below shows how to build ArduCopter for the Pixhawk2/Cube. Many other boards are
-    supported and the next section shows how to get a full list of them.
+    Here we use minlure as an example of Linux board. Other boards can be used
+    and the next section shows how to get a list of available boards.
 
     ```sh
-    ./waf configure --board CubeBlack
+    ./waf configure --board minlure
     ./waf copter
     ```
 
     The first command should be called only once or when you want to change a
     configuration option. One configuration often used is the `--board` option to
     switch from one board to another one. For example we could switch to
-    SkyViper GPS drone and build again:
+    Pixhawk and build again:
 
     ```sh
-    ./waf configure --board skyviper-v2450
+    ./waf configure --board px4-v2
     ./waf copter
     ```
-
-    If building for the bebop2 the binary must be built statically:
-
-    ```sh
-    ./waf configure --board bebop --static
-    ./waf copter
-    ```    
-
-    The "arducopter" binary should appear in the `build/<board-name>/bin` directory.
 
 * **List available boards**
 
@@ -59,36 +43,6 @@ list some basic and more used commands as example.
     ```sh
     ./waf list_boards
 
-    ```
-
-    Here are some commands to configure waf for commonly used boards:
-
-    ```sh
-    ./waf configure --board bebop --static # Bebop or Bebop2
-    ./waf configure --board edge           # emlid edge
-    ./waf configure --board fmuv3          # 3DR Pixhawk 2 boards
-    ./waf configure --board navio2         # emlid navio2
-    ./waf configure --board Pixhawk1       # Pixhawk1
-    ./waf configure --board CubeBlack      # Hex/ProfiCNC Cube Black (formerly known as Pixhawk 2.1)
-    ./waf configure --board Pixracer       # Pixracer
-    ./waf configure --board skyviper-v2450 # SkyRocket's SkyViper GPS drone using ChibiOS
-    ./waf configure --board sitl           # software-in-the-loop simulator
-    ./waf configure --board sitl --debug   # software-in-the-loop simulator with debug symbols
-
-    ```
-
-* **List of available vehicle types**
-
-    Here is a list of the most common vehicle build targets:
-
-    ```sh
-    ./waf copter                            # All multirotor types
-    ./waf heli                              # Helicopter types
-    ./waf plane                             # Fixed wing airplanes including VTOL
-    ./waf rover                             # Ground-based rovers and surface boats
-    ./waf sub                               # ROV and other submarines
-    ./waf antennatracker                    # Antenna trackers
-    
     ```
 
 * **Clean the build**
@@ -105,34 +59,15 @@ list some basic and more used commands as example.
 * **Upload or install**
 
     Build commands have a `--upload` option in order to upload the binary built
-    to a connected board. This option is supported by Pixhawk and Linux-based boards.
-    The command below uses the `--targets` option that is explained in the next item.
+    to a connected board. This option is supported by Pixhawk. The command below
+    uses the `--targets` option that is explained in the next item.
 
     ```sh
-    ./waf --targets bin/arducopter --upload
+    ./waf --targets bin/arducopter-quad --upload
     ```
 
-    For Linux boards you need first to configure the IP of the board you
-    are going to upload to. This is done on configure phase with:
-
-    ```sh
-    ./waf configure --board <board> --rsync-dest <destination>
-    ```
-
-    The commands below give a concrete example (board and destination
-    IP will change according to the board used):
-
-    ```sh
-    ./waf configure --board navio2 --rsync-dest root@192.168.1.2:/
-    ./waf --target bin/arducopter --upload
-    ```
-
-    This allows to set a destination to which the `--upload` option will upload
-    the binary.  Under the hood  it installs to a temporary location and calls
-    `rsync <temp_install_location>/ <destination>`.
-
-    On Linux boards there's also an install command, which will install to a certain
-    directory, just like the temporary install above does. This can be
+    Currently Linux boards don't support the upload option, but there's an
+    install command, which will install to a certain directory. This can be
     used by distributors to create .deb, .rpm or other package types:
 
     ```sh
@@ -157,23 +92,11 @@ list some basic and more used commands as example.
 
     ```
     # Quad frame of ArduCopter
-    ./waf --targets bin/arducopter
+    ./waf --targets bin/arducopter-quad
 
     # unit test of our math functions
     ./waf --targets tests/test_math
     ```
-
-* **Use clang instead of gcc**
-
-    Currently, gcc is the default on linux, and clang is used for MacOS.
-    Building with clang on linux can be accomplished by setting the CXX
-    environment variables during the configure step, e.g.:
-
-    ```
-    CXX=clang++ CC=clang ./waf configure --board=sitl
-    ```
-
-    Note: Your clang binary names may differ.
 
 * **Other options**
 
@@ -303,7 +226,7 @@ to `build/<board>/` to the option `--targets`. Example:
 
 ```bash
 # Build arducopter for quad frame
-./waf --targets bin/arducopter
+./waf --targets bin/arducopter-quad
 
 # Build vectors unit test
 ./waf --targets tests/test_vectors
@@ -342,7 +265,8 @@ Examples:
 
 It's possible to pass the option `--debug` to the `configure` command. That
 will set compiler flags to store debugging information in the binaries so that
-you can use them with `gdb`, for example. That option might come handy when using SITL.
+you can use them with `gdb`, for example. The build directory will be set to
+`build/<board>-debug/`. That option might come handy when using SITL.
 
 ### Build-system wrappers ###
 

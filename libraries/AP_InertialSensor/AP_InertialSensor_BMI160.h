@@ -17,27 +17,16 @@
 #pragma once
 
 #include <AP_HAL/AP_HAL.h>
-#include <AP_HAL/SPIDevice.h>
-#include <AP_HAL/I2CDevice.h>
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_LINUX
 
 #include "AP_InertialSensor.h"
 #include "AP_InertialSensor_Backend.h"
 
-#if CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_AERO
-#define BMI160_DEFAULT_ROTATION ROTATION_ROLL_180
-#else
-#define BMI160_DEFAULT_ROTATION ROTATION_NONE
-#endif
-
 class AP_InertialSensor_BMI160 : public AP_InertialSensor_Backend {
 public:
     static AP_InertialSensor_Backend *probe(AP_InertialSensor &imu,
-                                            AP_HAL::OwnPtr<AP_HAL::SPIDevice> dev,
-                                            enum Rotation rotation=BMI160_DEFAULT_ROTATION);
-
-    static AP_InertialSensor_Backend *probe(AP_InertialSensor &imu,
-                                            AP_HAL::OwnPtr<AP_HAL::I2CDevice> dev,
-                                            enum Rotation rotation=BMI160_DEFAULT_ROTATION);
+                                            AP_HAL::OwnPtr<AP_HAL::SPIDevice> dev);
 
     /**
      * Configure the sensors and start reading routine.
@@ -48,8 +37,7 @@ public:
 
 private:
     AP_InertialSensor_BMI160(AP_InertialSensor &imu,
-                             AP_HAL::OwnPtr<AP_HAL::Device> dev,
-                             enum Rotation rotation);
+                             AP_HAL::OwnPtr<AP_HAL::Device> dev);
 
     /**
      * If the macro BMI160_DEBUG is defined, check if there are errors reported
@@ -110,7 +98,7 @@ private:
     /**
      * Device periodic callback to read data from the sensors.
      */
-    void _poll_data();
+    bool _poll_data();
 
     /**
      * Read samples from fifo.
@@ -118,7 +106,6 @@ private:
     void _read_fifo();
 
     AP_HAL::OwnPtr<AP_HAL::Device> _dev;
-    enum Rotation _rotation;
 
     uint8_t _accel_instance;
     float _accel_scale;
@@ -128,3 +115,5 @@ private:
 
     AP_HAL::DigitalSource *_int1_pin;
 };
+
+#endif

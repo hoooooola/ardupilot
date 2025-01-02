@@ -25,35 +25,22 @@
   based on AP_ADSB,  Tom Pittenger, November 2015
 */
 
+#include <AP_AHRS/AP_AHRS.h>
 #include <AP_ADSB/AP_ADSB.h>
 
-#if HAL_ADSB_ENABLED
+// F_RCVRY possible parameter values
+#define AP_AVOIDANCE_RECOVERY_REMAIN_IN_AVOID_ADSB                  0
+#define AP_AVOIDANCE_RECOVERY_RESUME_PREVIOUS_FLIGHTMODE            1
+#define AP_AVOIDANCE_RECOVERY_RTL                                   2
+#define AP_AVOIDANCE_RECOVERY_RESUME_IF_AUTO_ELSE_LOITER            3
 
 #define AP_AVOIDANCE_STATE_RECOVERY_TIME_MS                 2000    // we will not downgrade state any faster than this (2 seconds)
 
 #define AP_AVOIDANCE_ESCAPE_TIME_SEC                        2       // vehicle runs from thread for 2 seconds
 
 class AP_Avoidance {
+
 public:
-
-    // constructor
-    AP_Avoidance(class AP_ADSB &adsb);
-
-    /* Do not allow copies */
-    CLASS_NO_COPY(AP_Avoidance);
-
-    // get singleton instance
-    static AP_Avoidance *get_singleton() {
-        return _singleton;
-    }
-
-    // F_RCVRY possible parameter values:
-    enum class RecoveryAction {
-        REMAIN_IN_AVOID_ADSB       = 0,
-        RESUME_PREVIOUS_FLIGHTMODE = 1,
-        RTL                        = 2,
-        RESUME_IF_AUTO_ELSE_LOITER = 3,
-    };
 
     // obstacle class to hold latest information for a known obstacles
     class Obstacle {
@@ -74,6 +61,8 @@ public:
         uint32_t last_gcs_report_time; // millis
     };
 
+    // constructor
+    AP_Avoidance(AP_AHRS &ahrs, class AP_ADSB &adsb);
 
     // add obstacle to the list of known obstacles
     void add_obstacle(uint32_t obstacle_timestamp_ms,
@@ -94,8 +83,8 @@ public:
     void update();
 
     // enable or disable avoidance
-    void enable() { _enabled.set(true); };
-    void disable() { _enabled.set(false); };
+    void enable() { _enabled = true; };
+    void disable() { _enabled = false; };
 
     // current overall threat level
     MAV_COLLISION_THREAT_LEVEL current_threat_level() const;
@@ -117,7 +106,7 @@ protected:
 
     // recover after all threats have cleared.  child classes must override this method
     // recovery_action is from F_RCVRY parameter
-    virtual void handle_recovery(RecoveryAction recovery_action) = 0;
+    virtual void handle_recovery(uint8_t recovery_action) = 0;
 
     uint32_t _last_state_change_ms = 0;
     MAV_COLLISION_THREAT_LEVEL _threat_level = MAV_COLLISION_THREAT_LEVEL_NONE;
@@ -139,16 +128,17 @@ protected:
     bool get_destination_perpendicular(const AP_Avoidance::Obstacle *obstacle, Vector3f &newdest_neu, const float wp_speed_xy, const float wp_speed_z, const uint8_t _minimum_avoid_height);
 
     // get unit vector away from the nearest obstacle
-    bool get_vector_perpendicular(const AP_Avoidance::Obstacle *obstacle, Vector3f &vec_neu) const;
+    bool get_vector_perpendicular(const AP_Avoidance::Obstacle *obstacle, Vector3f &vec_neu);
 
     // helper functions to calculate destination to get us away from obstacle
     // Note: v1 is NED
     static Vector3f perpendicular_xyz(const Location &p1, const Vector3f &v1, const Location &p2);
     static Vector2f perpendicular_xy(const Location &p1, const Vector3f &v1, const Location &p2);
 
-private:
+    // reference to AHRS, so we can ask for our position, heading and speed
+    const AP_AHRS &_ahrs;
 
-    void send_collision_all(const AP_Avoidance::Obstacle &threat, MAV_COLLISION_ACTION behaviour) const;
+private:
 
     // constants
     const uint32_t MAX_OBSTACLE_AGE_MS = 5000;      // obstacles that have not been heard from for 5 seconds are removed from the list
@@ -168,7 +158,7 @@ private:
     void deinit();
 
     // get unique id for adsb
-    uint32_t src_id_for_adsb_vehicle(const AP_ADSB::adsb_vehicle_t &vehicle) const;
+    uint32_t src_id_for_adsb_vehicle(AP_ADSB::adsb_vehicle_t vehicle) const;
 
     void check_for_threats();
     void update_threat_level(const Location &my_loc,
@@ -201,19 +191,15 @@ private:
     AP_Int8     _fail_time_horizon;
     AP_Int16    _fail_distance_xy;
     AP_Int16    _fail_distance_z;
-    AP_Int16    _fail_altitude_minimum;
 
     AP_Int8     _warn_action;
     AP_Int8     _warn_time_horizon;
     AP_Float    _warn_distance_xy;
     AP_Float    _warn_distance_z;
-
-    // multi-thread support for avoidance
-    HAL_Semaphore _rsem;
-
-    static AP_Avoidance *_singleton;
 };
 
+float closest_distance_between_radial_and_point(const Vector2f &w,
+                                                const Vector2f &p);
 float closest_approach_xy(const Location &my_loc,
                           const Vector3f &my_vel,
                           const Location &obstacle_loc,
@@ -225,11 +211,3 @@ float closest_approach_z(const Location &my_loc,
                          const Location &obstacle_loc,
                          const Vector3f &obstacle_vel,
                          uint8_t time_horizon);
-
-
-namespace AP {
-    AP_Avoidance *ap_avoidance();
-};
-
-#endif
-

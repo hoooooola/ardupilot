@@ -16,15 +16,12 @@
  */
 #include "AP_Compass_BMM150.h"
 
-#if AP_COMPASS_BMM150_ENABLED
-
 #include <AP_HAL/AP_HAL.h>
 
 #include <utility>
 
 #include <AP_HAL/utility/sparse-endian.h>
 #include <AP_Math/AP_Math.h>
-#include <stdio.h>
 
 #define CHIP_ID_REG 0x40
 #define CHIP_ID_VAL 0x32
@@ -61,16 +58,17 @@
 #define DIG_XY2_REG 0x70
 #define DIG_XY1_REG 0x71
 
-#define MEASURE_TIME_USEC 16667
+#define MEASURE_TIME_USEC 10000
 
 extern const AP_HAL::HAL &hal;
 
-AP_Compass_Backend *AP_Compass_BMM150::probe(AP_HAL::OwnPtr<AP_HAL::I2CDevice> dev, bool force_external, enum Rotation rotation)
+AP_Compass_Backend *AP_Compass_BMM150::probe(Compass &compass,
+                                             AP_HAL::OwnPtr<AP_HAL::I2CDevice> dev)
 {
     if (!dev) {
         return nullptr;
     }
-    AP_Compass_BMM150 *sensor = new AP_Compass_BMM150(std::move(dev), force_external, rotation);
+    AP_Compass_BMM150 *sensor = new AP_Compass_BMM150(compass, std::move(dev));
     if (!sensor || !sensor->init()) {
         delete sensor;
         return nullptr;
@@ -79,8 +77,10 @@ AP_Compass_Backend *AP_Compass_BMM150::probe(AP_HAL::OwnPtr<AP_HAL::I2CDevice> d
     return sensor;
 }
 
-AP_Compass_BMM150::AP_Compass_BMM150(AP_HAL::OwnPtr<AP_HAL::Device> dev, bool force_external, enum Rotation rotation)
-    : _dev(std::move(dev)), _rotation(rotation), _force_external(force_external)
+AP_Compass_BMM150::AP_Compass_BMM150(Compass &compass,
+                                     AP_HAL::OwnPtr<AP_HAL::Device> dev)
+    : AP_Compass_Backend(compass)
+    , _dev(std::move(dev))
 {
 }
 
@@ -100,27 +100,10 @@ bool AP_Compass_BMM150::_load_trim_values()
         le16_t dig_z3;
         int8_t dig_xy2;
         uint8_t dig_xy1;
-    } PACKED trim_registers, trim_registers2;
+    } PACKED trim_registers;
 
-    // read the registers twice to confirm we have the right
-    // values. There is no CRC in the registers and these values are
-    // vital to correct operation
-    int8_t tries = 4;
-    while (tries--) {
-        if (!_dev->read_registers(DIG_X1_REG, (uint8_t *)&trim_registers,
-                                  sizeof(trim_registers))) {
-            continue;
-        }
-        if (!_dev->read_registers(DIG_X1_REG, (uint8_t *)&trim_registers2,
-                                  sizeof(trim_registers))) {
-            continue;
-        }
-        if (memcmp(&trim_registers, &trim_registers2, sizeof(trim_registers)) == 0) {
-            break;
-        }
-    }
-    if (-1 == tries) {
-        DEV_PRINTF("BMM150: Failed to load trim registers\n");
+    if (!_dev->read_registers(DIG_X1_REG, (uint8_t *)&trim_registers,
+                              sizeof(trim_registers))) {
         return false;
     }
 
@@ -144,44 +127,32 @@ bool AP_Compass_BMM150::init()
     uint8_t val = 0;
     bool ret;
 
-    _dev->get_semaphore()->take_blocking();
-
-    // 10 retries for init
-    _dev->set_retries(10);
-
-    // use checked registers to cope with bus errors
-    _dev->setup_checked_registers(4);
-    
-    int8_t boot_tries = 4;
-    while (boot_tries--) {
-        /* Do a soft reset */
-        ret = _dev->write_register(POWER_AND_OPERATIONS_REG, SOFT_RESET);
-        hal.scheduler->delay(2);
-        if (!ret) {
-            continue;
-        }
-
-        /* Change power state from suspend mode to sleep mode */
-        ret = _dev->write_register(POWER_AND_OPERATIONS_REG, POWER_CONTROL_VAL, true);
-        hal.scheduler->delay(2);
-        if (!ret) {
-            continue;
-        }
-
-        ret = _dev->read_registers(CHIP_ID_REG, &val, 1);
-        if (!ret) {
-            continue;
-        }
-        if (val == CHIP_ID_VAL) {
-            // found it
-            break;
-        }
-        if (boot_tries == 0) {
-            DEV_PRINTF("BMM150: Wrong chip ID 0x%02x should be 0x%02x\n", val, CHIP_ID_VAL);
-        }
+    if (!_dev->get_semaphore()->take(HAL_SEMAPHORE_BLOCK_FOREVER)) {
+        hal.console->printf("BMM150: Unable to get bus semaphore\n");
+        return false;
     }
-    if (-1 == boot_tries) {
+
+    /* Do a soft reset */
+    ret = _dev->write_register(POWER_AND_OPERATIONS_REG, SOFT_RESET);
+    if (!ret) {
         goto bus_error;
+    }
+    hal.scheduler->delay(2);
+
+    /* Change power state from suspend mode to sleep mode */
+    ret = _dev->write_register(POWER_AND_OPERATIONS_REG, POWER_CONTROL_VAL);
+    if (!ret) {
+        goto bus_error;
+    }
+    hal.scheduler->delay(2);
+
+    ret = _dev->read_registers(CHIP_ID_REG, &val, 1);
+    if (!ret) {
+        goto bus_error;
+    }
+    if (val != CHIP_ID_VAL) {
+        hal.console->printf("BMM150: Wrong id\n");
+        goto fail;
     }
 
     ret = _load_trim_values();
@@ -196,16 +167,16 @@ bool AP_Compass_BMM150::init()
      * - ODR = 20
      * But we are going to use 30Hz of ODR
      */
-    ret = _dev->write_register(REPETITIONS_XY_REG, (47 - 1) / 2, true);
+    ret = _dev->write_register(REPETITIONS_XY_REG, (47 - 1) / 2);
     if (!ret) {
         goto bus_error;
     }
-    ret = _dev->write_register(REPETITIONS_Z_REG, 83 - 1, true);
+    ret = _dev->write_register(REPETITIONS_Z_REG, 83 - 1);
     if (!ret) {
         goto bus_error;
     }
     /* Change operation mode from sleep to normal and set ODR */
-    ret = _dev->write_register(OP_MODE_SELF_TEST_ODR_REG, NORMAL_MODE | ODR_30HZ, true);
+    ret = _dev->write_register(OP_MODE_SELF_TEST_ODR_REG, NORMAL_MODE | ODR_30HZ);
     if (!ret) {
         goto bus_error;
     }
@@ -213,29 +184,19 @@ bool AP_Compass_BMM150::init()
     _dev->get_semaphore()->give();
 
     /* register the compass instance in the frontend */
+    _compass_instance = register_compass();
+
     _dev->set_device_type(DEVTYPE_BMM150);
-    if (!register_compass(_dev->get_bus_id(), _compass_instance)) {
-        return false;
-    }
     set_dev_id(_compass_instance, _dev->get_bus_id());
 
-    set_rotation(_compass_instance, _rotation);
-
-    if (_force_external) {
-        set_external(_compass_instance, true);
-    }
-
-    // 2 retries for run
-    _dev->set_retries(2);
-    
     _dev->register_periodic_callback(MEASURE_TIME_USEC,
-            FUNCTOR_BIND_MEMBER(&AP_Compass_BMM150::_update, void));
+            FUNCTOR_BIND_MEMBER(&AP_Compass_BMM150::_update, bool));
 
-    _last_read_ms = AP_HAL::millis();
-    
     return true;
 
 bus_error:
+    hal.console->printf("BMM150: Bus communication error\n");
+fail:
     _dev->get_semaphore()->give();
     return false;
 }
@@ -244,7 +205,7 @@ bus_error:
  * Compensation algorithm got from https://github.com/BoschSensortec/BMM050_driver
  * this is not explained in datasheet.
  */
-int16_t AP_Compass_BMM150::_compensate_xy(int16_t xy, uint32_t rhall, int32_t txy1, int32_t txy2) const
+int16_t AP_Compass_BMM150::_compensate_xy(int16_t xy, uint32_t rhall, int32_t txy1, int32_t txy2)
 {
     int32_t inter = ((int32_t)_dig.xyz1) << 14;
     inter /= rhall;
@@ -263,46 +224,32 @@ int16_t AP_Compass_BMM150::_compensate_xy(int16_t xy, uint32_t rhall, int32_t tx
     return val;
 }
 
-int16_t AP_Compass_BMM150::_compensate_z(int16_t z, uint32_t rhall) const
+int16_t AP_Compass_BMM150::_compensate_z(int16_t z, uint32_t rhall)
 {
-    int32_t dividend = int32_t(z - _dig.z4) << 15;
-    int32_t dividend2 = dividend - ((_dig.z3 * (int32_t(rhall) - int32_t(_dig.xyz1))) >> 2);
+    int32_t dividend = ((int32_t)(z - _dig.z4)) << 15;
+    dividend -= (_dig.z3 * (rhall - _dig.xyz1)) >> 2;
 
-    int32_t divisor = int32_t(_dig.z1) * (rhall << 1);
+    int32_t divisor = ((int32_t)_dig.z1) * (rhall << 1);
     divisor += 0x8000;
     divisor >>= 16;
     divisor += _dig.z2;
 
-    int16_t ret = constrain_int32(dividend2 / divisor, -0x8000, 0x8000);
-#if 0
-    static uint8_t counter;
-    if (counter++ == 0) {
-        printf("ret=%d z=%d rhall=%u z1=%d z2=%d z3=%d z4=%d xyz1=%d dividend=%d dividend2=%d divisor=%d\n",
-               ret, z, rhall, _dig.z1, _dig.z2, _dig.z3, _dig.z4, _dig.xyz1, dividend, dividend2, divisor);
-    }
-#endif
-    return ret;
+    return constrain_int32(dividend / divisor, -0x8000, 0x8000);
 }
 
-void AP_Compass_BMM150::_update()
+bool AP_Compass_BMM150::_update()
 {
+    const uint32_t time_usec = AP_HAL::micros();
+
     le16_t data[4];
     bool ret = _dev->read_registers(DATA_X_LSB_REG, (uint8_t *) &data, sizeof(data));
 
     /* Checking data ready status */
     if (!ret || !(data[3] & 0x1)) {
-        _dev->check_next_register();
-        uint32_t now = AP_HAL::millis();
-        if (now - _last_read_ms > 250) {
-            // cope with power cycle to sensor
-            _last_read_ms = now;
-            _dev->write_register(POWER_AND_OPERATIONS_REG, SOFT_RESET);
-            _dev->write_register(POWER_AND_OPERATIONS_REG, POWER_CONTROL_VAL, true);
-        }
-        return;
+        return true;
     }
 
-    const uint16_t rhall = le16toh(data[3]) >> 2;
+    const uint16_t rhall = le16toh(data[3] >> 2);
 
     Vector3f raw_field = Vector3f{
         (float) _compensate_xy(((int16_t)le16toh(data[0])) >> 3,
@@ -316,16 +263,44 @@ void AP_Compass_BMM150::_update()
     /* convert uT to milligauss */
     raw_field *= 10;
 
-    _last_read_ms = AP_HAL::millis();
+    /* rotate raw_field from sensor frame to body frame */
+    rotate_field(raw_field, _compass_instance);
 
-    accumulate_sample(raw_field, _compass_instance);
-    _dev->check_next_register();
+    /* publish raw_field (uncorrected point sample) for calibration use */
+    publish_raw_field(raw_field, time_usec, _compass_instance);
+
+    /* correct raw_field for known errors */
+    correct_field(raw_field, _compass_instance);
+
+    if (!_sem->take(HAL_SEMAPHORE_BLOCK_FOREVER)) {
+        return true;
+    }
+    _mag_accum += raw_field;
+    _accum_count++;
+    if (_accum_count == 10) {
+        _mag_accum /= 2;
+        _accum_count = 5;
+    }
+    _sem->give();
+    return true;
 }
 
 void AP_Compass_BMM150::read()
 {
-    drain_accumulated_samples(_compass_instance);
+    if (!_sem->take_nonblocking()) {
+        return;
+    }
+    if (_accum_count == 0) {
+        _sem->give();
+        return;
+    }
+
+    Vector3f field(_mag_accum);
+    field /= _accum_count;
+    _mag_accum.zero();
+    _accum_count = 0;
+    _sem->give();
+
+    publish_filtered_field(field, _compass_instance);
 }
 
-
-#endif  // AP_COMPASS_BMM150_ENABLED

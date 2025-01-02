@@ -2,9 +2,6 @@
 
 """
 Extract version information for the various vehicle types, print it
-
-AP_FLAKE8_CLEAN
-
 """
 
 import os
@@ -13,16 +10,15 @@ import sys
 
 from optparse import OptionParser
 
-parser = OptionParser("print_version.py [options] ArduCopter|ArduPlane|Rover|AntennaTracker")
+parser = OptionParser("print_version.py [options] ArduCopter|ArduPlane|APMrover2|AntennaTracker")
 
 (opts, args) = parser.parse_args()
 
 includefiles = {
     "ArduCopter": "version.h",
     "ArduPlane": "version.h",
-    "Rover": "version.h",
+    "APMrover2": "version.h",
     "AntennaTracker": "version.h",
-    "ArduSub": "version.h",
 }
 
 if len(args) > 0:
@@ -32,7 +28,7 @@ if len(args) > 0:
         sys.exit(1)
     includefilepath = "%s/%s" % (vehicle, includefiles[vehicle])
 else:
-    # assume we are in e.g. APM/Rover/
+    # assume we are in e.g. APM/APMrover2/
     vehicle = os.path.basename(os.getcwd())
     if vehicle not in includefiles:
         print("Unknown vehicle (%s) (be in a vehicle directory or supply a vehicle type as an argument)" % (vehicle,))
@@ -42,8 +38,8 @@ else:
 
 file = open(includefilepath)
 
-firmware_version_regex = re.compile(r".*define +FIRMWARE_VERSION.*")
-firmware_version_extract_regex = re.compile(r".*define +FIRMWARE_VERSION[	 ]+(?P<major>\d+)[ ]*,[ 	]*(?P<minor>\d+)[ ]*,[	 ]*(?P<point>\d+)[ ]*,[	 ]*(?P<type>[A-Z_]+)[	 ]*")  # noqa: E501
+firmware_version_regex = re.compile(".*define +FIRMWARE_VERSION.*")
+firmware_version_extract_regex = re.compile(".*define +FIRMWARE_VERSION[	 ]+(?P<major>\d+)[ ]*,[ 	]*(?P<minor>\d+)[ ]*,[	 ]*(?P<point>\d+)[ ]*,[	 ]*(?P<type>[A-Z_]+)[	 ]*")
 
 for line in file:
     if not firmware_version_regex.match(line):
